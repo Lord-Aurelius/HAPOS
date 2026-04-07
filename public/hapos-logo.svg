@@ -1,0 +1,15 @@
+<svg width="520" height="140" viewBox="0 0 520 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Edit the text nodes below if you want to change the letters later. -->
+  <rect x="10" y="16" width="108" height="108" rx="30" fill="#5F3118"/>
+  <rect x="16" y="22" width="96" height="96" rx="26" fill="url(#haposGradient)"/>
+  <path d="M42 43H56V64H76V43H90V96H76V76H56V96H42V43Z" fill="#FFF8F1"/>
+  <text x="144" y="72" fill="#23160F" font-family="Georgia, serif" font-size="54" font-weight="700" letter-spacing="-2">HAPOS</text>
+  <text x="146" y="102" fill="#71594A" font-family="Arial, sans-serif" font-size="14" font-weight="700" letter-spacing="4">HOUSE AURELIUS POINT OF SALE</text>
+  <defs>
+    <linearGradient id="haposGradient" x1="24" y1="28" x2="108" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D6864A"/>
+      <stop offset="0.58" stop-color="#9C5427"/>
+      <stop offset="1" stop-color="#6B351A"/>
+    </linearGradient>
+  </defs>
+</svg>

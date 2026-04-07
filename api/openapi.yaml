@@ -1,0 +1,1180 @@
+openapi: 3.1.0
+info:
+  title: HAPOS API
+  version: 1.0.0
+  summary: House Aurelius Point of Sale multi-tenant barbershop and salon management API
+servers:
+  - url: https://api.example.com
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Dashboard
+  - name: Services
+  - name: Customers
+  - name: Service Records
+  - name: Expenses
+  - name: Reports
+  - name: SMS
+  - name: Subscriptions
+  - name: Super Admin
+paths:
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with business slug, username, and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get authenticated user context
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+  /v1/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Revenue, commissions, expenses, and profit summary
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - in: query
+          name: month
+          schema:
+            type: string
+            format: date
+          description: Any date within the target month
+      responses:
+        '200':
+          description: Dashboard totals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummary'
+  /v1/services:
+    get:
+      tags: [Services]
+      summary: List tenant services
+      responses:
+        '200':
+          description: Active and inactive services
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Service'
+  /v1/products:
+    get:
+      tags: [Services]
+      summary: List tenant products used in service costing
+      responses:
+        '200':
+          description: Product list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+    post:
+      tags: [Services]
+      summary: Create a product for usage-cost tracking
+      description: Accessible to `shop_admin` and `super_admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+    post:
+      tags: [Services]
+      summary: Create a service in the price list
+      description: Accessible to `shop_admin` and `super_admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      responses:
+        '201':
+          description: Service created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+  /v1/services/{serviceId}:
+    patch:
+      tags: [Services]
+      summary: Update a service
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      responses:
+        '200':
+          description: Service updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+    delete:
+      tags: [Services]
+      summary: Deactivate or remove a service
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '204':
+          description: Service removed
+  /v1/customers:
+    get:
+      tags: [Customers]
+      summary: Search customers
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Name or phone search
+      responses:
+        '200':
+          description: Matching customers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Customer'
+    post:
+      tags: [Customers]
+      summary: Create a customer
+      description: Accessible to all shop roles.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerInput'
+      responses:
+        '201':
+          description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+  /v1/customers/{customerId}:
+    get:
+      tags: [Customers]
+      summary: Get a customer profile
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '200':
+          description: Customer detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerDetail'
+    patch:
+      tags: [Customers]
+      summary: Update a customer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerInput'
+      responses:
+        '200':
+          description: Customer updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+  /v1/customers/{customerId}/history:
+    get:
+      tags: [Customers]
+      summary: Get visit history for one customer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '200':
+          description: Customer visit history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceRecord'
+  /v1/service-records:
+    get:
+      tags: [Service Records]
+      summary: List service records
+      description: Staff should only see their own records; admins can see all tenant records.
+      parameters:
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: staffId
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Service record list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceRecord'
+    post:
+      tags: [Service Records]
+      summary: Record a completed service
+      description: Accessible to all shop roles and should complete fast enough for counter use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceRecordInput'
+      responses:
+        '201':
+          description: Service record created and thank-you SMS queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRecord'
+  /v1/service-records/{recordId}:
+    get:
+      tags: [Service Records]
+      summary: Get one service record
+      parameters:
+        - $ref: '#/components/parameters/RecordId'
+      responses:
+        '200':
+          description: Service record detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRecord'
+    patch:
+      tags: [Service Records]
+      summary: Correct a recorded service
+      description: Accessible to `shop_admin` and `super_admin`. Corrections must refresh reports, customer history, and commission totals.
+      parameters:
+        - $ref: '#/components/parameters/RecordId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceRecordInput'
+      responses:
+        '200':
+          description: Service record corrected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRecord'
+  /v1/expenses:
+    get:
+      tags: [Expenses]
+      summary: List expenses
+      description: Accessible to `shop_admin` and `super_admin`.
+      responses:
+        '200':
+          description: Expense list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Expense'
+    post:
+      tags: [Expenses]
+      summary: Create an expense
+      description: Accessible to `shop_admin` and `super_admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseInput'
+      responses:
+        '201':
+          description: Expense created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+  /v1/expenses/{expenseId}:
+    patch:
+      tags: [Expenses]
+      summary: Update an expense
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - $ref: '#/components/parameters/ExpenseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpenseInput'
+      responses:
+        '200':
+          description: Expense updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+    delete:
+      tags: [Expenses]
+      summary: Delete an expense
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - $ref: '#/components/parameters/ExpenseId'
+      responses:
+        '204':
+          description: Expense deleted
+  /v1/commission-payouts:
+    get:
+      tags: [Reports]
+      summary: List commission payouts
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - in: query
+          name: month
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Commission payout list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CommissionPayout'
+    post:
+      tags: [Reports]
+      summary: Record a commission payout
+      description: Accessible to `shop_admin` and `super_admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommissionPayoutInput'
+      responses:
+        '201':
+          description: Commission payout created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommissionPayout'
+  /v1/reports/commissions/monthly:
+    get:
+      tags: [Reports]
+      summary: Monthly commission report by staff
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - in: query
+          name: month
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Monthly commission rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CommissionRow'
+  /v1/reports/financials:
+    get:
+      tags: [Reports]
+      summary: Daily or monthly financial report
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - in: query
+          name: granularity
+          schema:
+            type: string
+            enum: [daily, monthly]
+        - in: query
+          name: dateFrom
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: dateTo
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Financial report rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FinancialRow'
+  /v1/reports/monthly:
+    get:
+      tags: [Reports]
+      summary: Full monthly shop report
+      description: Accessible to `shop_admin` and `super_admin`.
+      parameters:
+        - in: query
+          name: month
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Monthly loyalty, staff, product, and improvement report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonthlyReport'
+  /v1/sms/promotions:
+    post:
+      tags: [SMS]
+      summary: Queue a promotional SMS campaign
+      description: Accessible to `shop_admin` and `super_admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsPromotionRequest'
+      responses:
+        '202':
+          description: Promotion campaign queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queuedRecipients:
+                    type: integer
+  /v1/subscriptions/current:
+    get:
+      tags: [Subscriptions]
+      summary: Get the current subscription for the tenant
+      description: Accessible to `shop_admin` and `super_admin`.
+      responses:
+        '200':
+          description: Current subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+  /v1/admin/tenants:
+    get:
+      tags: [Super Admin]
+      summary: List all tenants
+      description: Accessible to `super_admin` only.
+      responses:
+        '200':
+          description: Tenant list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tenant'
+    post:
+      tags: [Super Admin]
+      summary: Create a tenant
+      description: Accessible to `super_admin` only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantInput'
+      responses:
+        '201':
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+  /v1/admin/tenants/{tenantId}/suspend:
+    post:
+      tags: [Super Admin]
+      summary: Suspend a tenant
+      description: Accessible to `super_admin` only.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Tenant suspended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      in: path
+      name: tenantId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ServiceId:
+      in: path
+      name: serviceId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CustomerId:
+      in: path
+      name: customerId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExpenseId:
+      in: path
+      name: expenseId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RecordId:
+      in: path
+      name: recordId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    LoginRequest:
+      type: object
+      required: [businessSlug, username, password]
+      properties:
+        businessSlug:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+    MeResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        tenant:
+          $ref: '#/components/schemas/Tenant'
+        subscriptionActive:
+          type: boolean
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+          nullable: true
+        fullName:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [super_admin, shop_admin, staff]
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        ownerName:
+          type: string
+          nullable: true
+        logoUrl:
+          type: string
+          nullable: true
+        motto:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        storeNumber:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+        currencyCode:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, inactive]
+    TenantInput:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        ownerName:
+          type: string
+        logoUrl:
+          type: string
+        motto:
+          type: string
+        address:
+          type: string
+        storeNumber:
+          type: string
+        timezone:
+          type: string
+        currencyCode:
+          type: string
+    Service:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        price:
+          type: number
+        commissionType:
+          type: string
+          enum: [fixed, percentage]
+        commissionValue:
+          type: number
+        isActive:
+          type: boolean
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        unitCost:
+          type: number
+        description:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+    ProductInput:
+      type: object
+      required: [name, unitCost]
+      properties:
+        name:
+          type: string
+        unitCost:
+          type: number
+        description:
+          type: string
+        isActive:
+          type: boolean
+    ServiceInput:
+      type: object
+      required: [name, price, commissionType, commissionValue]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        commissionType:
+          type: string
+          enum: [fixed, percentage]
+        commissionValue:
+          type: number
+        durationMinutes:
+          type: integer
+        isActive:
+          type: boolean
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        phone:
+          type: string
+        phoneE164:
+          type: string
+        marketingOptIn:
+          type: boolean
+    CustomerInput:
+      type: object
+      required: [name, phoneE164]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        phoneE164:
+          type: string
+        notes:
+          type: string
+        marketingOptIn:
+          type: boolean
+    CustomerDetail:
+      allOf:
+        - $ref: '#/components/schemas/Customer'
+        - type: object
+          properties:
+            totalVisits:
+              type: integer
+            lastVisitAt:
+              type: string
+              format: date-time
+              nullable: true
+            lifetimeValue:
+              type: number
+    ServiceRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        staffId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceName:
+          type: string
+        isCustomService:
+          type: boolean
+        price:
+          type: number
+        description:
+          type: string
+          nullable: true
+        commission:
+          type: number
+        correctedAt:
+          type: string
+          format: date-time
+          nullable: true
+        correctedBy:
+          type: string
+          format: uuid
+          nullable: true
+        correctedByName:
+          type: string
+          nullable: true
+        productUsages:
+          type: array
+          items:
+            type: object
+            properties:
+              productId:
+                type: string
+                format: uuid
+              productName:
+                type: string
+              quantity:
+                type: integer
+              unitCost:
+                type: number
+              totalCost:
+                type: number
+        performedAt:
+          type: string
+          format: date-time
+    ServiceRecordInput:
+      type: object
+      required: [staffId]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        customerName:
+          type: string
+        customerPhone:
+          type: string
+        staffId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceMode:
+          type: string
+          enum: [price-list, custom]
+        serviceName:
+          type: string
+        customServiceName:
+          type: string
+        price:
+          type: number
+        customPrice:
+          type: number
+        description:
+          type: string
+        productId:
+          type: string
+          format: uuid
+          nullable: true
+        productQuantity:
+          type: integer
+        performedAt:
+          type: string
+          format: date-time
+    Expense:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+        description:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        expenseDate:
+          type: string
+          format: date
+    ExpenseInput:
+      type: object
+      required: [category, amount, expenseDate]
+      properties:
+        category:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        expenseDate:
+          type: string
+          format: date
+    CommissionRow:
+      type: object
+      properties:
+        staffId:
+          type: string
+          format: uuid
+        staffName:
+          type: string
+        totalServices:
+          type: integer
+        totalRevenue:
+          type: number
+        totalCommission:
+          type: number
+    CommissionPayout:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        staffId:
+          type: string
+          format: uuid
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        amount:
+          type: number
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+    CommissionPayoutInput:
+      type: object
+      required: [staffId, periodStart, periodEnd, amount]
+      properties:
+        staffId:
+          type: string
+          format: uuid
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        amount:
+          type: number
+        paidAt:
+          type: string
+          format: date-time
+        reference:
+          type: string
+        notes:
+          type: string
+    FinancialRow:
+      type: object
+      properties:
+        period:
+          type: string
+        income:
+          type: number
+        expenses:
+          type: number
+        commissionsPaid:
+          type: number
+        productCosts:
+          type: number
+        netProfit:
+          type: number
+    DashboardSummary:
+      type: object
+      properties:
+        todayRevenue:
+          type: number
+        monthRevenue:
+          type: number
+        monthExpenses:
+          type: number
+        monthCommissionAccrued:
+          type: number
+        monthCommissionPaid:
+          type: number
+        monthProductCosts:
+          type: number
+        monthNetProfit:
+          type: number
+        topStaff:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommissionRow'
+        recentServices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceRecord'
+    SmsPromotionRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        customerIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        marketingOptInOnly:
+          type: boolean
+          default: true
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        planCode:
+          type: string
+        status:
+          type: string
+          enum: [trialing, active, past_due, expired, suspended, cancelled]
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        graceEndsAt:
+          type: string
+          format: date-time
+          nullable: true
+        amount:
+          type: number
+        currencyCode:
+          type: string
+        paymentTerms:
+          type: string
+          nullable: true
+    MonthlyReport:
+      type: object
+      properties:
+        monthLabel:
+          type: string
+        topCustomerByVisits:
+          type: object
+          nullable: true
+          properties:
+            customer:
+              $ref: '#/components/schemas/Customer'
+            visits:
+              type: integer
+            spent:
+              type: number
+        topCustomerBySpend:
+          type: object
+          nullable: true
+          properties:
+            customer:
+              $ref: '#/components/schemas/Customer'
+            visits:
+              type: integer
+            spent:
+              type: number
+        staffRanking:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommissionRow'
+        totalExpenses:
+          type: number
+        totalRevenue:
+          type: number
+        totalCommissions:
+          type: number
+        totalProductCosts:
+          type: number
+        topProducts:
+          type: array
+          items:
+            type: object
+            properties:
+              productName:
+                type: string
+              usageCount:
+                type: integer
+              totalCost:
+                type: number
+        remarks:
+          type: array
+          items:
+            type: string
+        headaches:
+          type: array
+          items:
+            type: string
+        improvements:
+          type: array
+          items:
+            type: string
