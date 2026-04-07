@@ -18,7 +18,7 @@ export function getRuntimeBackend(): HaposRuntimeBackend {
     return 'file';
   }
 
-  return process.env.VERCEL && hasDatabaseUrl() ? 'postgres' : 'file';
+  return hasDatabaseUrl() ? 'postgres' : 'file';
 }
 
 export function getRuntimeModeHeader() {

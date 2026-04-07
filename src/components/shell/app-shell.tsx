@@ -16,6 +16,9 @@ export function AppShell({ session, children }: AppShellProps) {
   const workspaceName = session.tenant?.name ?? 'HAPOS Platform';
   const workspaceLabel = session.tenant ? 'Business workspace' : 'Platform workspace';
   const userRoleLabel = session.user.role.replace('_', ' ');
+  const workspaceMeta = session.tenant
+    ? `${session.user.fullName} / ${userRoleLabel} / ${session.tenant.slug}`
+    : `${session.user.fullName} / ${userRoleLabel}`;
 
   return (
     <div className="shell-grid">
@@ -30,15 +33,12 @@ export function AppShell({ session, children }: AppShellProps) {
               <div className="workspace-title-block">
                 <p className="hero-kicker">{workspaceLabel}</p>
                 <div className="workspace-title">{workspaceName}</div>
-                <p className="workspace-subtitle">
-                  {session.user.fullName} / {userRoleLabel}
-                  {session.tenant ? ` / ${session.tenant.slug}` : ''}
-                </p>
+                <p className="workspace-subtitle">{workspaceMeta}</p>
               </div>
             </div>
 
             <div className="workspace-topbar-actions">
-              {session.tenant ? <span className="pill">Shop name: {session.tenant.name}</span> : <span className="pill">Super admin</span>}
+              {session.tenant ? <span className="pill">Business slug: {session.tenant.slug}</span> : <span className="pill">Platform access</span>}
               <form action={logoutAction}>
                 <button type="submit" className="button secondary">
                   Log out

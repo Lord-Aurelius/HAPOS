@@ -50,7 +50,7 @@ textarea {
 
 .shell-grid {
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-columns: clamp(232px, 18vw, 282px) minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -136,9 +136,9 @@ textarea {
 }
 
 .workspace-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 18px;
   padding: 22px 24px;
   border: 1px solid var(--line);
@@ -151,7 +151,7 @@ textarea {
 
 .workspace-topbar-main {
   display: flex;
-  align-items: center;
+  align-items: start;
   gap: 18px;
   min-width: 0;
 }
@@ -169,20 +169,26 @@ textarea {
   font-size: clamp(1.8rem, 3vw, 2.8rem);
   font-weight: 700;
   letter-spacing: -0.06em;
-  line-height: 1;
+  line-height: 1.04;
+  max-width: none;
+  text-wrap: pretty;
 }
 
 .workspace-subtitle {
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.5;
+  max-width: 72ch;
+  text-wrap: pretty;
 }
 
 .workspace-topbar-actions {
   display: flex;
   align-items: center;
+  justify-content: end;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .sidebar-group {
@@ -194,11 +200,17 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 12px 14px;
   border: 1px solid transparent;
   border-radius: 16px;
   color: rgba(255, 241, 230, 0.8);
   transition: 160ms ease;
+}
+
+.sidebar-link > span:first-child {
+  min-width: 0;
+  text-wrap: pretty;
 }
 
 .sidebar-link:hover,
@@ -223,12 +235,15 @@ textarea {
 }
 
 .workspace {
-  padding: 26px;
+  padding: clamp(16px, 2vw, 26px);
 }
 
 .workspace-inner {
   display: grid;
   gap: 24px;
+  width: 100%;
+  max-width: 1720px;
+  margin: 0 auto;
 }
 
 .hero {
@@ -252,11 +267,12 @@ textarea {
 
 .hero-title {
   margin: 0;
-  max-width: 11ch;
+  max-width: min(20ch, 100%);
   font-family: var(--font-heading), serif;
   font-size: clamp(2.5rem, 4vw, 4.75rem);
-  line-height: 0.98;
+  line-height: 1.02;
   letter-spacing: -0.05em;
+  text-wrap: balance;
 }
 
 .hero-subtitle {
@@ -304,7 +320,7 @@ textarea {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
 }
 
@@ -355,6 +371,8 @@ textarea {
   border-radius: 28px;
   background: var(--surface);
   box-shadow: var(--shadow);
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 320px;
 }
 
 .panel h2,
@@ -363,6 +381,7 @@ textarea {
   margin: 0;
   font-family: var(--font-heading), serif;
   letter-spacing: -0.03em;
+  text-wrap: balance;
 }
 
 .panel-header {
@@ -426,6 +445,7 @@ textarea {
   border-top: 1px solid rgba(8, 40, 54, 0.08);
   text-align: left;
   vertical-align: top;
+  padding-right: 14px;
 }
 
 .table th {
@@ -487,14 +507,14 @@ textarea {
 
 .service-picker {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
 .service-grid,
 .marketplace-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
 }
 
@@ -506,6 +526,8 @@ textarea {
   border: 1px solid rgba(8, 40, 54, 0.1);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.9);
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 320px;
 }
 
 .service-card-media,
@@ -622,6 +644,7 @@ textarea {
   font-family: var(--font-heading), serif;
   font-size: 2rem;
   letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 
 .muted {
@@ -664,7 +687,7 @@ textarea {
 
 .comparison-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
 }
 
@@ -823,6 +846,8 @@ textarea {
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.88);
   transition: 160ms ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 220px;
 }
 
 .ledger-card:hover,
@@ -852,7 +877,7 @@ textarea {
 
 .receipt-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
 }
 
@@ -871,9 +896,62 @@ textarea {
   flex-wrap: wrap;
 }
 
+.route-loading {
+  display: grid;
+  gap: 16px;
+}
+
+.loading-card {
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 24px;
+  overflow: hidden;
+}
+
+.loading-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.loading-line {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(36, 150, 216, 0.08), rgba(36, 150, 216, 0.2), rgba(20, 140, 107, 0.08));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+.loading-line.is-title {
+  height: 22px;
+  width: min(360px, 72%);
+}
+
+.loading-line.is-short {
+  width: min(160px, 42%);
+}
+
+.loading-line.is-medium {
+  width: min(240px, 58%);
+}
+
+.loading-card .loading-line + .loading-line {
+  margin-top: 12px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 @media (max-width: 1100px) {
   .shell-grid,
-  .login-shell,
   .service-entry-grid,
   .grid-two,
   .sales-ledger-grid,
@@ -888,14 +966,14 @@ textarea {
     height: auto;
   }
 
+  .workspace-topbar {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-topbar,
   .workspace-topbar-main {
     align-items: start;
     flex-direction: column;
-  }
-
-  .dashboard-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .print-header-top,
@@ -912,21 +990,16 @@ textarea {
     padding: 18px;
   }
 
+  .login-shell {
+    grid-template-columns: 1fr;
+  }
+
   .hero,
   .panel,
   .tile,
   .login-card {
     padding: 20px;
     border-radius: 24px;
-  }
-
-  .dashboard-grid,
-  .service-picker,
-  .receipt-grid,
-  .service-grid,
-  .marketplace-grid,
-  .comparison-grid {
-    grid-template-columns: 1fr;
   }
 
   .workspace-topbar {

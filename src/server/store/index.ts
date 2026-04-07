@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
+import { cache } from 'react';
 
 import type {
   AppSession,
@@ -445,12 +446,18 @@ async function writeStoreToPostgres(store: StoreState): Promise<void> {
   }
 }
 
-export async function readStore(): Promise<StoreState> {
+async function loadStoreDirect(): Promise<StoreState> {
   if (getRuntimeBackend() === 'postgres') {
     return readStoreFromPostgres();
   }
 
   return readStoreFromFile();
+}
+
+const readStoreCached = cache(loadStoreDirect);
+
+export async function readStore(): Promise<StoreState> {
+  return readStoreCached();
 }
 
 export async function writeStore(store: StoreState): Promise<void> {
@@ -489,7 +496,7 @@ export async function updateStore<T>(mutator: (store: StoreState) => T | Promise
     }
   }
 
-  const store = await readStore();
+  const store = await loadStoreDirect();
   const result = await mutator(store);
   await writeStore(store);
   return result;
