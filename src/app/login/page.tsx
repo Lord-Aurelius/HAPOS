@@ -15,7 +15,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <HaposLogo className="poster-logo" />
           <p className="hero-kicker">House Aurelius Point of Sale</p>
           <h1 className="hero-title">One platform for every chair, station, and shop.</h1>
-          <p className="hero-subtitle" style={{ color: 'rgba(255, 233, 213, 0.82)' }}>
+          <p className="hero-subtitle login-poster-copy">
             Multi-tenant service tracking for barbershops and salons with revenue visibility, commission control, customer history, and automated follow-up messaging.
           </p>
         </div>
@@ -46,7 +46,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           <form action={loginAction} className="field-grid" style={{ marginTop: 24 }}>
             <div className="field">
               <label htmlFor="businessSlug">Business slug</label>
-              <input id="businessSlug" name="businessSlug" placeholder="royal-fades" />
+              <input id="businessSlug" name="businessSlug" placeholder="your-business-slug" autoComplete="organization" />
+              <span className="field-hint">Use the slug your business admin gave you. HAPOS does not expose shop names here.</span>
             </div>
             <div className="field">
               <label htmlFor="username">Username</label>

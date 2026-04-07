@@ -9,6 +9,7 @@ import type {
   LoyaltyProgram,
   FinancialRow,
   MarketplaceAd,
+  MonthlyContributionPoint,
   MonthlyReport,
   Product,
   Service,
@@ -59,8 +60,28 @@ function startOfMonthLabel(value: Date) {
   return value.toLocaleString('en-KE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
+function addUtcMonths(value: Date, delta: number) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + delta, 1));
+}
+
 function getProductCost(record: ServiceRecord) {
   return (record.productUsages ?? []).reduce((sum, usage) => sum + usage.totalCost, 0);
+}
+
+function buildMonthlyContribution(records: ServiceRecord[], now: Date, monthCount = 6): MonthlyContributionPoint[] {
+  return Array.from({ length: monthCount }, (_, index) => {
+    const targetMonth = addUtcMonths(now, -index);
+    const monthRecords = records.filter((record) => sameUtcMonth(record.performedAt, targetMonth));
+
+    return {
+      monthKey: `${targetMonth.getUTCFullYear()}-${String(targetMonth.getUTCMonth() + 1).padStart(2, '0')}`,
+      monthLabel: startOfMonthLabel(targetMonth),
+      revenue: monthRecords.reduce((sum, record) => sum + record.price, 0),
+      commission: monthRecords.reduce((sum, record) => sum + record.commission, 0),
+      services: monthRecords.length,
+      clients: new Set(monthRecords.map((record) => record.customerId)).size,
+    };
+  });
 }
 
 function buildStaffPerformance(users: User[], records: ServiceRecord[]): StaffPerformance[] {
@@ -412,12 +433,21 @@ export async function getDashboardSummary(session: AppSession): Promise<Dashboar
       monthCommissionPaid: 0,
       monthProductCosts: 0,
       monthNetProfit: 0,
+      currentMonthLabel: startOfMonthLabel(new Date()),
+      previousMonthLabel: startOfMonthLabel(addUtcMonths(new Date(), -1)),
+      previousMonthRevenue: 0,
+      previousMonthCommissionAccrued: 0,
+      lifetimeRevenue: 0,
+      lifetimeCommission: 0,
+      highestEarner: null,
+      monthlyTrend: [],
       topStaff: [],
       recentServices: [],
     };
   }
 
   const now = new Date();
+  const previousMonth = addUtcMonths(now, -1);
   const tenantId = session.tenant.id;
   const [records, expenses, payouts, staffPerformance] = await Promise.all([
     listServiceRecords(tenantId),
@@ -438,6 +468,12 @@ export async function getDashboardSummary(session: AppSession): Promise<Dashboar
   const monthCommissionAccrued = visibleRecords
     .filter((record) => sameUtcMonth(record.performedAt, now))
     .reduce((sum, record) => sum + record.commission, 0);
+  const previousMonthRevenue = visibleRecords
+    .filter((record) => sameUtcMonth(record.performedAt, previousMonth))
+    .reduce((sum, record) => sum + record.price, 0);
+  const previousMonthCommissionAccrued = visibleRecords
+    .filter((record) => sameUtcMonth(record.performedAt, previousMonth))
+    .reduce((sum, record) => sum + record.commission, 0);
   const monthProductCosts = visibleRecords
     .filter((record) => sameUtcMonth(record.performedAt, now))
     .reduce((sum, record) => sum + getProductCost(record), 0);
@@ -453,6 +489,7 @@ export async function getDashboardSummary(session: AppSession): Promise<Dashboar
       : payouts
           .filter((payout) => payout.paidAt && sameUtcMonth(payout.paidAt, now))
           .reduce((sum, payout) => sum + payout.amount, 0);
+  const monthlyTrend = buildMonthlyContribution(visibleRecords, now);
 
   return {
     todayRevenue,
@@ -462,6 +499,14 @@ export async function getDashboardSummary(session: AppSession): Promise<Dashboar
     monthCommissionPaid,
     monthProductCosts,
     monthNetProfit: monthRevenue - monthExpenses - monthCommissionPaid - monthProductCosts,
+    currentMonthLabel: startOfMonthLabel(now),
+    previousMonthLabel: startOfMonthLabel(previousMonth),
+    previousMonthRevenue,
+    previousMonthCommissionAccrued,
+    lifetimeRevenue: visibleRecords.reduce((sum, record) => sum + record.price, 0),
+    lifetimeCommission: visibleRecords.reduce((sum, record) => sum + record.commission, 0),
+    highestEarner: session.user.role === 'staff' ? null : staffPerformance[0] ?? null,
+    monthlyTrend,
     topStaff: session.user.role === 'staff' ? staffPerformance.filter((row) => row.staffId === session.user.id) : staffPerformance,
     recentServices: visibleRecords.slice(0, 10),
   };

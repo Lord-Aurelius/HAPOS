@@ -29,7 +29,7 @@ export default async function CustomerLoginPage({ searchParams }: CustomerLoginP
           <HaposLogo className="poster-logo" />
           <p className="hero-kicker">Customer portal</p>
           <h1 className="hero-title">Track your visits, services, and offers in one place.</h1>
-          <p className="hero-subtitle" style={{ color: 'rgba(255, 233, 213, 0.82)' }}>
+          <p className="hero-subtitle login-poster-copy">
             Customers can sign in with their shop slug and phone number to view visit count, service history, price list,
             and platinum marketplace offers.
           </p>
@@ -59,7 +59,8 @@ export default async function CustomerLoginPage({ searchParams }: CustomerLoginP
           <form action={customerLoginAction} className="field-grid" style={{ marginTop: 24 }}>
             <div className="field">
               <label htmlFor="businessSlug">Business slug</label>
-              <input id="businessSlug" name="businessSlug" placeholder="royal-fades" required />
+              <input id="businessSlug" name="businessSlug" placeholder="your-business-slug" autoComplete="organization" required />
+              <span className="field-hint">Use the slug printed on your shop link or provided by the business.</span>
             </div>
             <div className="field">
               <label htmlFor="phone">Phone number</label>

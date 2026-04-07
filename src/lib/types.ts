@@ -236,6 +236,15 @@ export type StaffMetrics = {
   monthCommission: number;
 };
 
+export type MonthlyContributionPoint = {
+  monthKey: string;
+  monthLabel: string;
+  revenue: number;
+  commission: number;
+  services: number;
+  clients: number;
+};
+
 export type DashboardSummary = {
   todayRevenue: number;
   monthRevenue: number;
@@ -244,6 +253,14 @@ export type DashboardSummary = {
   monthCommissionPaid: number;
   monthProductCosts: number;
   monthNetProfit: number;
+  currentMonthLabel: string;
+  previousMonthLabel: string;
+  previousMonthRevenue: number;
+  previousMonthCommissionAccrued: number;
+  lifetimeRevenue: number;
+  lifetimeCommission: number;
+  highestEarner: StaffPerformance | null;
+  monthlyTrend: MonthlyContributionPoint[];
   topStaff: StaffPerformance[];
   recentServices: ServiceRecord[];
 };

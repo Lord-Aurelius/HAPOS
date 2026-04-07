@@ -1,8 +1,6 @@
 'use server';
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -90,20 +88,9 @@ function normalizeLoyaltyRewardType(value: string) {
   return value === 'subsidized_service' ? 'subsidized_service' : 'free_service';
 }
 
-function getImageExtension(file: File) {
-  const ext = path.extname(file.name || '').toLowerCase();
-  if (ext) {
-    return ext;
-  }
+const MAX_INLINE_IMAGE_BYTES = 1_500_000;
 
-  if (file.type === 'image/png') return '.png';
-  if (file.type === 'image/jpeg') return '.jpg';
-  if (file.type === 'image/webp') return '.webp';
-  if (file.type === 'image/svg+xml') return '.svg';
-  return '.png';
-}
-
-async function storeUploadedImage(file: File | null, folderName: string, prefix: string) {
+async function storeUploadedImage(file: File | null) {
   if (!file || file.size === 0) {
     return null;
   }
@@ -112,27 +99,27 @@ async function storeUploadedImage(file: File | null, folderName: string, prefix:
     throw new Error('Uploads must be image files.');
   }
 
-  const uploadsDir = path.join(process.cwd(), 'public', 'uploads', folderName);
-  await mkdir(uploadsDir, { recursive: true });
+  if (file.size > MAX_INLINE_IMAGE_BYTES) {
+    throw new Error('Uploads must stay under 1.5 MB.');
+  }
 
-  const filename = `${prefix}-${Date.now()}${getImageExtension(file)}`;
-  const outputPath = path.join(uploadsDir, filename);
   const bytes = Buffer.from(await file.arrayBuffer());
-
-  await writeFile(outputPath, bytes);
-  return `/uploads/${folderName}/${filename}`;
+  return `data:${file.type || 'image/png'};base64,${bytes.toString('base64')}`;
 }
 
 async function storeTenantLogo(file: File | null, tenantId: string) {
-  return storeUploadedImage(file, 'logos', tenantId);
+  void tenantId;
+  return storeUploadedImage(file);
 }
 
 async function storeServiceImage(file: File | null, serviceId: string) {
-  return storeUploadedImage(file, 'services', serviceId);
+  void serviceId;
+  return storeUploadedImage(file);
 }
 
 async function storeMarketplaceImage(file: File | null, adId: string) {
-  return storeUploadedImage(file, 'marketplace', adId);
+  void adId;
+  return storeUploadedImage(file);
 }
 
 function formDateTimeString(formData: FormData, key: string) {
