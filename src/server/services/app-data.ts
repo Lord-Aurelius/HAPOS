@@ -189,9 +189,16 @@ function buildLoyaltyProgress(program: LoyaltyProgram | null | undefined, lifeti
   };
 }
 
+const DEFAULT_PUBLIC_APP_URL = 'https://hapos.vercel.app';
+
+export function getPublicAppBaseUrl() {
+  const configured = (process.env.PUBLIC_APP_URL ?? '').trim();
+  return (configured || DEFAULT_PUBLIC_APP_URL).replace(/\/$/, '');
+}
+
 export function buildCustomerBookingUrl(slug: string) {
   const path = `/book/${slug}`;
-  const baseUrl = (process.env.PUBLIC_APP_URL ?? '').trim().replace(/\/$/, '');
+  const baseUrl = getPublicAppBaseUrl();
 
   return baseUrl ? `${baseUrl}${path}` : path;
 }

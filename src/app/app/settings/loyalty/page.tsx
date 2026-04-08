@@ -1,5 +1,6 @@
 import Link from 'next/link';
 
+import { BookingQrPanel } from '@/components/tenant/booking-qr-panel';
 import { formatCurrency } from '@/lib/format';
 import { requireSession } from '@/server/auth/demo-session';
 import { updateLoyaltySettingsAction } from '@/server/actions/hapos';
@@ -67,29 +68,13 @@ export default async function LoyaltySettingsPage({ searchParams }: LoyaltySetti
       ) : null}
 
       <section className="grid-two">
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Shareable customer booking link</h2>
-              <p className="panel-copy">This link lets customers choose a service, leave their phone number, and request the staff member they prefer.</p>
-            </div>
-          </div>
-
-          <div className="stack">
-            <div className="panel" style={{ padding: 18 }}>
-              <strong>{tenant.name}</strong>
-              <div className="eyebrow" style={{ marginTop: 6 }}>{bookingUrl}</div>
-            </div>
-            <div className="hero-actions">
-              <Link href={`/book/${tenant.slug}`} className="button">
-                Open booking page
-              </Link>
-              <Link href="/customer/login" className="button secondary">
-                Open customer login
-              </Link>
-            </div>
-          </div>
-        </div>
+        <BookingQrPanel
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+          bookingUrl={bookingUrl}
+          heading="Shareable customer booking access"
+          copy="This booking link is now derived from the live app URL at hapos.vercel.app, and the admin can also download a QR code for the shop."
+        />
 
         <div className="panel">
           <div className="panel-header">
@@ -161,6 +146,9 @@ export default async function LoyaltySettingsPage({ searchParams }: LoyaltySetti
               <button type="submit" className="button">
                 Save loyalty rules
               </button>
+              <Link href="/customer/login" className="button secondary">
+                Open customer login
+              </Link>
             </div>
           </form>
         </div>

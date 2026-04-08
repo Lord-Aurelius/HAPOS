@@ -10,10 +10,11 @@ import {
   updateTenantSubscriptionAction,
   updateTenantBrandingAction,
 } from '@/server/actions/hapos';
+import { BookingQrPanel } from '@/components/tenant/booking-qr-panel';
 import { BusinessAvatar } from '@/components/tenant/business-avatar';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
 import { getSubscriptionDisplayName } from '@/lib/plans';
-import { listSubscriptionPackages, listSubscriptions, listTenants } from '@/server/services/app-data';
+import { buildCustomerBookingUrl, listSubscriptionPackages, listSubscriptions, listTenants } from '@/server/services/app-data';
 import { getPlatformOverview, listCredentialRecordsForTenant } from '@/server/services/admin-tools';
 
 type SuperTenantsPageProps = {
@@ -419,6 +420,7 @@ export default async function SuperTenantsPage({ searchParams }: SuperTenantsPag
           const subscription = subscriptions.find((item) => item.tenantId === tenant.id);
           const tenantOverview = platformOverview.tenantRows.find((row) => row.tenantId === tenant.id);
           const credentials = credentialGroups.find((group) => group.tenantId === tenant.id)?.credentials ?? [];
+          const bookingUrl = buildCustomerBookingUrl(tenant.slug);
 
           return (
             <section className="panel" key={tenant.id}>
@@ -507,6 +509,14 @@ export default async function SuperTenantsPage({ searchParams }: SuperTenantsPag
                       </button>
                     </div>
                   </form>
+
+                  <BookingQrPanel
+                    tenantId={tenant.id}
+                    tenantName={tenant.name}
+                    bookingUrl={bookingUrl}
+                    heading="Customer booking QR"
+                    copy="Only admins can generate and download this code. Post it in the workplace so customers can scan directly into the booking page."
+                  />
 
                   <div className="panel" style={{ padding: 20 }}>
                     <h3 style={{ marginTop: 0 }}>Licence and archive controls</h3>
