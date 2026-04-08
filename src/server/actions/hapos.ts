@@ -346,6 +346,7 @@ export async function submitCustomerOrderAction(formData: FormData) {
       customerId: customer.id,
       serviceId: service.id,
       serviceName: service.name,
+      quotedPrice: service.price,
       requestedStaffId: staff?.id ?? null,
       requestedName: customer.name,
       requestedPhone: customer.phoneE164 || customer.phone,
@@ -353,6 +354,9 @@ export async function submitCustomerOrderAction(formData: FormData) {
       status: 'pending',
       requestedAt: now,
       statusUpdatedAt: null,
+      approvedAt: null,
+      approvedBy: null,
+      approvedRecordId: null,
       createdAt: now,
     });
 
@@ -415,6 +419,124 @@ export async function updateCustomerOrderStatusAction(formData: FormData) {
   touchShopPaths();
   revalidatePath(`/book/${session.tenant.slug}`);
   redirect(redirectTo);
+}
+
+export async function approveCustomerOrderToSalesAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) {
+    redirect('/super/tenants');
+  }
+
+  const orderId = formString(formData, 'orderId');
+  const staffId = formString(formData, 'staffId');
+  const performedAtRaw = formString(formData, 'performedAt');
+  const performedAt = formDateTimeString(formData, 'performedAt');
+  const description = formString(formData, 'description');
+
+  if (performedAtRaw && !performedAt) {
+    redirect('/app/sales?error=approval-invalid-date');
+  }
+
+  const result = await updateStore((store) => {
+    const order = store.customerOrders.find((item) => item.id === orderId);
+    if (!order || order.tenantId !== session.tenant!.id) {
+      return { status: 'missing' as const };
+    }
+
+    if (order.status === 'approved' && order.approvedRecordId) {
+      return { status: 'already-approved' as const, recordId: order.approvedRecordId };
+    }
+
+    if (order.status === 'cancelled') {
+      return { status: 'cancelled' as const };
+    }
+
+    const staff = store.users.find(
+      (item) =>
+        item.tenantId === session.tenant!.id &&
+        item.id === staffId &&
+        item.isActive &&
+        (item.role === 'staff' || item.role === 'shop_admin'),
+    );
+    if (!staff) {
+      return { status: 'staff-not-found' as const };
+    }
+
+    const service = store.services.find(
+      (item) => item.tenantId === session.tenant!.id && item.id === order.serviceId && item.isActive,
+    );
+    if (!service) {
+      return { status: 'service-not-found' as const };
+    }
+
+    const customer = store.customers.find((item) => item.tenantId === session.tenant!.id && item.id === order.customerId);
+    if (!customer) {
+      return { status: 'customer-not-found' as const };
+    }
+
+    const price = order.quotedPrice > 0 ? order.quotedPrice : service.price;
+    const commission = calculateCommission({
+      service: { commissionType: service.commissionType, commissionValue: service.commissionValue },
+      staff: { commissionType: staff.commissionType, commissionValue: staff.commissionValue },
+      price,
+    });
+
+    const now = new Date().toISOString();
+    const recordId = randomUUID();
+
+    store.serviceRecords.push({
+      id: recordId,
+      tenantId: session.tenant!.id,
+      customerId: customer.id,
+      staffId: staff.id,
+      serviceId: service.id,
+      serviceName: service.name,
+      isCustomService: false,
+      price,
+      description: description || order.notes,
+      commissionType: commission.commissionType,
+      commissionValue: commission.commissionValue,
+      commissionAmount: commission.commissionAmount,
+      productUsages: [],
+      performedAt: performedAt ?? now,
+      recordedBy: session.user.id,
+      correctedAt: null,
+      correctedBy: null,
+      createdAt: now,
+    });
+
+    order.serviceName = service.name;
+    order.quotedPrice = price;
+    order.requestedStaffId = staff.id;
+    order.status = 'approved';
+    order.statusUpdatedAt = now;
+    order.approvedAt = now;
+    order.approvedBy = session.user.id;
+    order.approvedRecordId = recordId;
+
+    return { status: 'approved' as const, recordId };
+  });
+
+  if (result.status === 'already-approved') {
+    touchShopPaths();
+    redirect(`/app/sales?recordId=${result.recordId}&success=request-approved`);
+  }
+
+  if (result.status === 'missing' || result.status === 'cancelled' || result.status === 'customer-not-found') {
+    redirect('/app/sales?error=approval-missing');
+  }
+
+  if (result.status === 'staff-not-found') {
+    redirect('/app/sales?error=approval-staff');
+  }
+
+  if (result.status === 'service-not-found') {
+    redirect('/app/sales?error=approval-service');
+  }
+
+  touchShopPaths();
+  revalidatePath(`/book/${session.tenant.slug}`);
+  redirect(`/app/sales?recordId=${result.recordId}&success=request-approved`);
 }
 
 export async function recordServiceAction(formData: FormData) {

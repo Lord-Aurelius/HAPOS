@@ -12,15 +12,16 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
   if (!session.tenant) {
     return null;
   }
+  const tenant = session.tenant;
 
   const params = await searchParams;
   const [customers, customerOrders, services, users, products, metrics] = await Promise.all([
-    listCustomers(session.tenant.id),
-    listCustomerOrders(session.tenant.id, { status: 'pending' }),
-    listServices(session.tenant.id),
-    listUsers(session.tenant.id),
-    listProducts(session.tenant.id),
-    getStaffMetrics(session.tenant.id, session.user.id),
+    listCustomers(tenant.id),
+    listCustomerOrders(tenant.id, { status: 'pending' }),
+    listServices(tenant.id),
+    listUsers(tenant.id),
+    listProducts(tenant.id),
+    getStaffMetrics(tenant.id, session.user.id),
   ]);
   const staff = users.filter((user) => user.role === 'staff' || user.role === 'shop_admin');
   const hasServices = services.length > 0;
@@ -51,7 +52,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                   : params.error === 'request-invalid'
                     ? 'That customer request update was not valid.'
                     : params.success === 'request-updated'
-                      ? 'Customer request queue updated.'
+                      ? 'Customer request queue updated. Acknowledged bookings now wait in Sales for admin approval.'
                   : 'Service recorded and thank-you SMS queued.'}
           </span>
         </div>
@@ -74,7 +75,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                 Staff can choose a predefined service or record an off-menu custom service. Customer phone remains the anchor for visit history.
               </p>
             </div>
-            <span className="pill">{session.tenant.name}</span>
+            <span className="pill">{tenant.name}</span>
           </div>
 
           <form action={recordServiceAction} className="field-grid">
@@ -200,7 +201,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
         <div className="panel-header">
           <div>
             <h2>Customer request queue</h2>
-            <p className="panel-copy">Requests from the public booking link land here so the floor team can prepare before the customer arrives.</p>
+            <p className="panel-copy">Requests from the public booking link land here first. Acknowledge one to move it into Sales where an admin can approve it into the ledger.</p>
           </div>
           <span className="pill">{customerOrders.length} pending</span>
         </div>
@@ -224,7 +225,10 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                     <strong>{order.customerName}</strong>
                     <div className="eyebrow">{order.customerPhone}</div>
                   </td>
-                  <td>{order.serviceName}</td>
+                  <td>
+                    <strong>{order.serviceName}</strong>
+                    <div className="eyebrow">{formatCurrency(order.quotedPrice, tenant.currencyCode)}</div>
+                  </td>
                   <td>{order.requestedStaffName || 'No preference'}</td>
                   <td>{order.notes || 'No notes'}</td>
                   <td>{order.requestedAt.slice(0, 16).replace('T', ' ')}</td>
@@ -235,7 +239,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                         <input type="hidden" name="nextStatus" value="acknowledged" />
                         <input type="hidden" name="redirectTo" value="/app/service-entry?success=request-updated" />
                         <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
-                          Acknowledge
+                          Send to admin approval
                         </button>
                       </form>
                       <form action={updateCustomerOrderStatusAction}>

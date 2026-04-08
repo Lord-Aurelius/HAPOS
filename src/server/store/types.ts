@@ -235,6 +235,7 @@ export type StoreCustomerOrder = {
   customerId: string;
   serviceId: string;
   serviceName: string;
+  quotedPrice: number;
   requestedStaffId?: string | null;
   requestedName: string;
   requestedPhone: string;
@@ -242,6 +243,9 @@ export type StoreCustomerOrder = {
   status: CustomerOrderStatus;
   requestedAt: string;
   statusUpdatedAt?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  approvedRecordId?: string | null;
   createdAt: string;
 };
 

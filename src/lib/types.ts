@@ -22,7 +22,7 @@ export type MarketplaceAdStatus = 'pending' | 'approved' | 'rejected';
 
 export type LoyaltyRewardType = 'free_service' | 'subsidized_service';
 
-export type CustomerOrderStatus = 'pending' | 'acknowledged' | 'cancelled';
+export type CustomerOrderStatus = 'pending' | 'acknowledged' | 'approved' | 'cancelled';
 
 export type LoyaltyProgram = {
   isEnabled: boolean;
@@ -136,12 +136,16 @@ export type CustomerOrder = {
   customerPhone: string;
   serviceId: string;
   serviceName: string;
+  quotedPrice: number;
   requestedStaffId?: string | null;
   requestedStaffName?: string | null;
   notes?: string;
   status: CustomerOrderStatus;
   requestedAt: string;
   statusUpdatedAt?: string | null;
+  approvedAt?: string | null;
+  approvedRecordId?: string | null;
+  approvedByName?: string | null;
 };
 
 export type Expense = {

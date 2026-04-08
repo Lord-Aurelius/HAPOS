@@ -1,9 +1,9 @@
 import Link from 'next/link';
 
 import { formatCurrency, formatDateTime } from '@/lib/format';
-import { updateServiceRecordAction } from '@/server/actions/hapos';
+import { approveCustomerOrderToSalesAction, updateCustomerOrderStatusAction, updateServiceRecordAction } from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
-import { listAllCustomers, listProducts, listServiceRecords, listServices, listUsers } from '@/server/services/app-data';
+import { listAllCustomers, listCustomerOrders, listProducts, listServiceRecords, listServices, listUsers } from '@/server/services/app-data';
 
 type SalesPageProps = {
   searchParams: Promise<{ recordId?: string; success?: string; error?: string }>;
@@ -24,8 +24,32 @@ function getMessage(params: { success?: string; error?: string }) {
     return 'Enter a valid service date and time before saving.';
   }
 
+  if (params.error === 'approval-invalid-date') {
+    return 'Enter a valid approval date and time before posting the booking into the sales ledger.';
+  }
+
+  if (params.error === 'approval-staff') {
+    return 'Choose an active staff member before approving that booking.';
+  }
+
+  if (params.error === 'approval-service') {
+    return 'The booked service is no longer active. Re-enable it or cancel that booking request.';
+  }
+
+  if (params.error === 'approval-missing') {
+    return 'That booking could not be approved because it was missing, cancelled, or already moved.';
+  }
+
   if (params.success === 'record-updated') {
     return 'Sale correction saved. Dashboard, commissions, and reports now reflect the change.';
+  }
+
+  if (params.success === 'request-approved') {
+    return 'Customer booking approved and posted into the sales ledger.';
+  }
+
+  if (params.success === 'request-cancelled') {
+    return 'Pending booking cancelled before it reached the sales ledger.';
   }
 
   return null;
@@ -39,15 +63,18 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
   const tenant = session.tenant;
 
   const params = await searchParams;
-  const [records, services, staff, products, customers] = await Promise.all([
+  const [records, services, staff, products, customers, customerOrders] = await Promise.all([
     listServiceRecords(tenant.id),
     listServices(tenant.id),
     listUsers(tenant.id),
     listProducts(tenant.id),
     listAllCustomers(tenant.id),
+    listCustomerOrders(tenant.id, { status: ['pending', 'acknowledged'] }),
   ]);
 
   const visibleStaff = staff.filter((user) => user.role === 'shop_admin' || user.role === 'staff');
+  const approvalDefaultStaffId = visibleStaff[0]?.id ?? '';
+  const pendingApprovals = customerOrders.filter((order) => order.status === 'pending' || order.status === 'acknowledged');
   const selectedRecord =
     records.find((record) => record.id === params.recordId) ??
     records[0] ??
@@ -72,6 +99,102 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
           <span className="pill">{feedback}</span>
         </section>
       ) : null}
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Sales awaiting admin approval</h2>
+            <p className="panel-copy">
+              Public booking requests land here after the floor team sees them. Admin approval is what turns a booking into
+              an official sales-ledger entry.
+            </p>
+          </div>
+          <span className="pill">{pendingApprovals.length} awaiting approval</span>
+        </div>
+
+        {pendingApprovals.length > 0 ? (
+          <div className="stack">
+            {pendingApprovals.map((order) => (
+              <article key={order.id} className="ledger-card">
+                <div className="ledger-card-top">
+                  <div>
+                    <strong>{order.customerName}</strong>
+                    <div className="eyebrow">
+                      {order.serviceName} / {order.requestedStaffName || 'No preferred staff yet'}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <strong>{formatCurrency(order.quotedPrice, tenant.currencyCode)}</strong>
+                    <div className="eyebrow">
+                      {order.status === 'pending' ? 'New booking request' : 'Ready for ledger approval'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="list-row">
+                  <div>
+                    <strong>Requested at</strong>
+                    <div className="eyebrow">{formatDateTime(order.requestedAt)}</div>
+                  </div>
+                  <div className="eyebrow">{order.customerPhone}</div>
+                </div>
+
+                <form action={approveCustomerOrderToSalesAction} className="field-grid">
+                  <input type="hidden" name="orderId" value={order.id} />
+
+                  <div className="field">
+                    <label htmlFor={`approvalStaff-${order.id}`}>Staff member</label>
+                    <select id={`approvalStaff-${order.id}`} name="staffId" defaultValue={order.requestedStaffId ?? approvalDefaultStaffId}>
+                      {visibleStaff.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor={`approvalPerformedAt-${order.id}`}>Service date and time</label>
+                    <input
+                      id={`approvalPerformedAt-${order.id}`}
+                      name="performedAt"
+                      type="datetime-local"
+                      defaultValue={toDateTimeLocalValue(order.requestedAt)}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor={`approvalDescription-${order.id}`}>Ledger notes</label>
+                    <textarea
+                      id={`approvalDescription-${order.id}`}
+                      name="description"
+                      defaultValue={order.notes ?? ''}
+                      placeholder="Any notes to keep on the official sales record."
+                    />
+                  </div>
+
+                  <div className="hero-actions">
+                    <button type="submit" className="button">
+                      Approve to sales ledger
+                    </button>
+                  </div>
+                </form>
+
+                <form action={updateCustomerOrderStatusAction}>
+                  <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="nextStatus" value="cancelled" />
+                  <input type="hidden" name="redirectTo" value="/app/sales?success=request-cancelled" />
+                  <button type="submit" className="button secondary">
+                    Cancel booking
+                  </button>
+                </form>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No customer bookings are waiting for admin approval right now.</p>
+        )}
+      </section>
 
       <section className="sales-ledger-grid">
         <section className="panel">

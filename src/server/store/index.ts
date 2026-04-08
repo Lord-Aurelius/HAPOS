@@ -330,8 +330,35 @@ function migrateStoreState(parsed: StoreState) {
   }
 
   for (const order of parsed.customerOrders) {
-    if (!('statusUpdatedAt' in order)) {
-      order.statusUpdatedAt = null;
+    const legacyOrder = order as {
+      serviceId: string;
+      tenantId: string;
+      statusUpdatedAt?: string | null;
+      quotedPrice?: number;
+      approvedAt?: string | null;
+      approvedBy?: string | null;
+      approvedRecordId?: string | null;
+    };
+
+    if (!('quotedPrice' in legacyOrder)) {
+      legacyOrder.quotedPrice =
+        parsed.services.find((service) => service.id === legacyOrder.serviceId && service.tenantId === legacyOrder.tenantId)?.price ?? 0;
+      changed = true;
+    }
+    if (!('statusUpdatedAt' in legacyOrder)) {
+      legacyOrder.statusUpdatedAt = null;
+      changed = true;
+    }
+    if (!('approvedAt' in legacyOrder)) {
+      legacyOrder.approvedAt = null;
+      changed = true;
+    }
+    if (!('approvedBy' in legacyOrder)) {
+      legacyOrder.approvedBy = null;
+      changed = true;
+    }
+    if (!('approvedRecordId' in legacyOrder)) {
+      legacyOrder.approvedRecordId = null;
       changed = true;
     }
   }

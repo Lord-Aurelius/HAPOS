@@ -361,8 +361,13 @@ textarea {
 
 .grid-two {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 16px;
+  align-items: start;
+}
+
+.grid-two > * {
+  min-width: 0;
 }
 
 .panel {
@@ -371,8 +376,6 @@ textarea {
   border-radius: 28px;
   background: var(--surface);
   box-shadow: var(--shadow);
-  content-visibility: auto;
-  contain-intrinsic-size: 1px 320px;
 }
 
 .panel h2,

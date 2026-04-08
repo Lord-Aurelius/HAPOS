@@ -137,6 +137,7 @@ function mapCustomerOrder(
 ): CustomerOrder {
   const staff = order.requestedStaffId ? store.users.find((user) => user.id === order.requestedStaffId) ?? null : null;
   const customer = store.customers.find((item) => item.id === order.customerId) ?? null;
+  const approvedBy = order.approvedBy ? store.users.find((user) => user.id === order.approvedBy) ?? null : null;
 
   return {
     id: order.id,
@@ -146,12 +147,16 @@ function mapCustomerOrder(
     customerPhone: order.requestedPhone || customer?.phoneE164 || customer?.phone || '',
     serviceId: order.serviceId,
     serviceName: order.serviceName,
+    quotedPrice: order.quotedPrice,
     requestedStaffId: order.requestedStaffId ?? null,
     requestedStaffName: staff?.fullName ?? null,
     notes: order.notes,
     status: order.status,
     requestedAt: order.requestedAt,
     statusUpdatedAt: order.statusUpdatedAt ?? null,
+    approvedAt: order.approvedAt ?? null,
+    approvedRecordId: order.approvedRecordId ?? null,
+    approvedByName: approvedBy?.fullName ?? null,
   };
 }
 
@@ -297,13 +302,14 @@ export async function listMarketplaceQueue(): Promise<MarketplaceAd[]> {
 
 export async function listCustomerOrders(
   tenantId: string,
-  options: { status?: CustomerOrder['status'] } = {},
+  options: { status?: CustomerOrder['status'] | CustomerOrder['status'][] } = {},
 ): Promise<CustomerOrder[]> {
   const store = await readStore();
+  const statuses = options.status ? new Set(Array.isArray(options.status) ? options.status : [options.status]) : null;
 
   return store.customerOrders
     .filter((order) => order.tenantId === tenantId)
-    .filter((order) => !options.status || order.status === options.status)
+    .filter((order) => !statuses || statuses.has(order.status))
     .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
     .map((order) => mapCustomerOrder(store, order));
 }
