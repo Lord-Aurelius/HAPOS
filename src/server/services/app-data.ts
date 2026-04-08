@@ -191,9 +191,30 @@ function buildLoyaltyProgress(program: LoyaltyProgram | null | undefined, lifeti
 
 const DEFAULT_PUBLIC_APP_URL = 'https://hapos.vercel.app';
 
+function normalizePublicAppUrl(value: string | undefined) {
+  const configured = (value ?? '').trim();
+  if (!configured) {
+    return DEFAULT_PUBLIC_APP_URL;
+  }
+
+  try {
+    const url = new URL(configured);
+    const hostname = url.hostname.toLowerCase();
+
+    // Ignore stale preview hosts so shared booking links and QR codes stay
+    // pinned to the canonical production app URL.
+    if (hostname.endsWith('.vercel.app') && hostname !== 'hapos.vercel.app') {
+      return DEFAULT_PUBLIC_APP_URL;
+    }
+
+    return url.origin;
+  } catch {
+    return DEFAULT_PUBLIC_APP_URL;
+  }
+}
+
 export function getPublicAppBaseUrl() {
-  const configured = (process.env.PUBLIC_APP_URL ?? '').trim();
-  return (configured || DEFAULT_PUBLIC_APP_URL).replace(/\/$/, '');
+  return normalizePublicAppUrl(process.env.PUBLIC_APP_URL).replace(/\/$/, '');
 }
 
 export function buildCustomerBookingUrl(slug: string) {
