@@ -26,5 +26,10 @@ public/uploads/services/*
 public/uploads/marketplace/*
 !public/uploads/marketplace/.gitkeep
 .vscode
+android/.gradle
+android/local.properties
+android/build
+android/app/build
+android/.idea
 
 /generated/prisma

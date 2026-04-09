@@ -9,11 +9,17 @@ const nextConfig: NextConfig = {
         distDir: customDistDir,
       }
     : {}),
+  
+  // ⚡ Add this for static export (needed by Capacitor)
+  output: 'export',       // replaces `next export`
+  distDir: 'out',         // ensure static output goes to 'out' folder
+
   experimental: {
     cpus: 1,
     workerThreads: true,
     webpackBuildWorker: false,
   },
+  
   ...(process.env.HAPOS_SKIP_BUILD_CHECKS
     ? {
         typescript: {

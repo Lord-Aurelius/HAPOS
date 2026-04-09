@@ -1,0 +1,8 @@
+{
+  "appId": "com.houseaurelius.hapos",
+  "appName": "HAPOS",
+  "server": {
+    "url": "https://hapos.vercel.app",
+    "cleartext": false
+  }
+}
