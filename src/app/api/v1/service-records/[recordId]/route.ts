@@ -1,23 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
+import { parseDateTimeInputValue } from '@/lib/date-time';
 import { apiBadRequest, apiOk } from '@/server/http/api';
 import { requireSession } from '@/server/auth/demo-session';
 import { calculateCommission, listServiceRecords } from '@/server/services/app-data';
+import { voidServiceRecord } from '@/server/store/service-records';
 import { updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
-
-function parseIsoDateTime(value: unknown) {
-  if (typeof value !== 'string' || !value.trim()) {
-    return null;
-  }
-
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) {
-    return null;
-  }
-
-  return new Date(timestamp).toISOString();
-}
 
 function upsertTenantCustomer(
   store: StoreState,
@@ -93,8 +82,14 @@ export async function PATCH(request: Request, { params }: RouteProps) {
   const { recordId } = await params;
   const body = await request.json();
   const serviceMode = body.serviceMode === 'custom' ? 'custom' : 'price-list';
+  const timeZone =
+    typeof body?.timeZone === 'string' && body.timeZone.trim()
+      ? body.timeZone.trim()
+      : session.tenant.timezone || 'UTC';
   const performedAt =
-    typeof body.performedAt === 'string' && body.performedAt.trim() ? parseIsoDateTime(body.performedAt) : null;
+    typeof body.performedAt === 'string' && body.performedAt.trim()
+      ? parseDateTimeInputValue(body.performedAt, timeZone)
+      : null;
 
   if (body.performedAt && !performedAt) {
     return apiBadRequest('performedAt must be a valid ISO date-time or datetime-local value.');
@@ -112,6 +107,9 @@ export async function PATCH(request: Request, { params }: RouteProps) {
       const record = store.serviceRecords.find((item) => item.id === recordId && item.tenantId === session.tenant!.id);
       if (!record) {
         throw new Error('Service record not found.');
+      }
+      if (record.voidedAt) {
+        throw new Error('This sale has already been removed from the ledger.');
       }
 
       const tenantId = session.tenant!.id;
@@ -197,6 +195,10 @@ export async function PATCH(request: Request, { params }: RouteProps) {
         correctedAt: record.correctedAt,
         correctedBy: record.correctedBy,
         correctedByName: record.correctedBy ? users.find((item) => item.id === record.correctedBy)?.fullName ?? null : null,
+        voidedAt: record.voidedAt,
+        voidedBy: record.voidedBy,
+        voidedByName: record.voidedBy ? users.find((item) => item.id === record.voidedBy)?.fullName ?? null : null,
+        voidReason: record.voidReason,
       };
     });
 
@@ -204,4 +206,33 @@ export async function PATCH(request: Request, { params }: RouteProps) {
   } catch (error) {
     return apiBadRequest(error instanceof Error ? error.message : 'Could not update service record.', 400);
   }
+}
+
+export async function DELETE(request: Request, { params }: RouteProps) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) {
+    return apiBadRequest('Tenant context is required.', 400);
+  }
+
+  const { recordId } = await params;
+  const body = (await request.json().catch(() => null)) as { reason?: string } | null;
+
+  const result = await updateStore((store) =>
+    voidServiceRecord(store, {
+      tenantId: session.tenant!.id,
+      recordId,
+      userId: session.user.id,
+      reason: body?.reason ?? 'Duplicate or mistaken sale entry removed from the ledger.',
+    }),
+  );
+
+  if (result.status === 'missing') {
+    return apiBadRequest('Service record not found.', 404);
+  }
+
+  return apiOk({
+    recordId,
+    nextRecordId: result.nextRecordId,
+    restoredOrderId: result.restoredOrderId,
+  });
 }

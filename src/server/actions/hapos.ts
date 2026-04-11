@@ -5,12 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
+import { parseDateTimeInputValue } from '@/lib/date-time';
 import { isPlatinumPlan, normalizePlanCode } from '@/lib/plans';
 import { getAccessState } from '@/server/auth/access';
 import { signInCustomerSession, signOutCustomerSession } from '@/server/auth/customer-session';
 import { requireSession, signInSession, signOutSession } from '@/server/auth/demo-session';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
+import { voidServiceRecord } from '@/server/store/service-records';
 import { authenticateCustomer, authenticateUser, readStore, updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
 
@@ -134,6 +136,15 @@ function formDateTimeString(formData: FormData, key: string) {
   }
 
   return new Date(timestamp).toISOString();
+}
+
+function formDateTimeStringForTimeZone(formData: FormData, key: string, timeZone: string) {
+  const value = formString(formData, key);
+  if (!value) {
+    return null;
+  }
+
+  return parseDateTimeInputValue(value, timeZone);
 }
 
 function touchShopPaths() {
@@ -427,10 +438,11 @@ export async function approveCustomerOrderToSalesAction(formData: FormData) {
     redirect('/super/tenants');
   }
 
+  const tenantTimeZone = formString(formData, 'tenantTimeZone') || session.tenant.timezone || 'UTC';
   const orderId = formString(formData, 'orderId');
   const staffId = formString(formData, 'staffId');
   const performedAtRaw = formString(formData, 'performedAt');
-  const performedAt = formDateTimeString(formData, 'performedAt');
+  const performedAt = formDateTimeStringForTimeZone(formData, 'performedAt', tenantTimeZone);
   const description = formString(formData, 'description');
 
   if (performedAtRaw && !performedAt) {
@@ -502,6 +514,9 @@ export async function approveCustomerOrderToSalesAction(formData: FormData) {
       recordedBy: session.user.id,
       correctedAt: null,
       correctedBy: null,
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
       createdAt: now,
     });
 
@@ -545,6 +560,7 @@ export async function recordServiceAction(formData: FormData) {
     redirect('/super/tenants');
   }
 
+  const tenantTimeZone = formString(formData, 'tenantTimeZone') || session.tenant.timezone || 'UTC';
   const customerName = formString(formData, 'customerName');
   const customerPhone = normalizePhoneInput(formString(formData, 'customerPhone'));
   const serviceMode = formString(formData, 'serviceMode');
@@ -555,9 +571,15 @@ export async function recordServiceAction(formData: FormData) {
   const description = formString(formData, 'description');
   const productId = formString(formData, 'productId');
   const productQuantity = formNumber(formData, 'productQuantity');
+  const performedAtRaw = formString(formData, 'performedAt');
+  const performedAt = formDateTimeStringForTimeZone(formData, 'performedAt', tenantTimeZone);
 
   if (!customerName || !customerPhone) {
     redirect('/app/service-entry?error=customer-required');
+  }
+
+  if (performedAtRaw && !performedAt) {
+    redirect('/app/service-entry?error=invalid-date');
   }
 
   if (serviceMode === 'custom' && (!customServiceName || customPrice <= 0)) {
@@ -597,6 +619,7 @@ export async function recordServiceAction(formData: FormData) {
     });
 
     const usages = buildProductUsages(store, tenantId, productId, productQuantity);
+    const now = new Date().toISOString();
 
     store.serviceRecords.push({
       id: randomUUID(),
@@ -612,11 +635,14 @@ export async function recordServiceAction(formData: FormData) {
       commissionValue: commission.commissionValue,
       commissionAmount: commission.commissionAmount,
       productUsages: usages,
-      performedAt: new Date().toISOString(),
+      performedAt: performedAt ?? now,
       recordedBy: session.user.id,
       correctedAt: null,
       correctedBy: null,
-      createdAt: new Date().toISOString(),
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
+      createdAt: now,
     });
 
     const smsId = randomUUID();
@@ -648,6 +674,7 @@ export async function updateServiceRecordAction(formData: FormData) {
   const recordId = formString(formData, 'recordId');
   const tenantId = formString(formData, 'tenantId') || session.tenant?.id;
   const redirectTo = formString(formData, 'redirectTo') || `/app/sales?recordId=${recordId}&success=record-updated`;
+  const tenantTimeZone = formString(formData, 'tenantTimeZone') || session.tenant?.timezone || 'UTC';
   const customerName = formString(formData, 'customerName');
   const customerPhone = formString(formData, 'customerPhone');
   const serviceMode = formString(formData, 'serviceMode');
@@ -659,7 +686,7 @@ export async function updateServiceRecordAction(formData: FormData) {
   const productId = formString(formData, 'productId');
   const productQuantity = formNumber(formData, 'productQuantity');
   const performedAtRaw = formString(formData, 'performedAt');
-  const performedAt = formDateTimeString(formData, 'performedAt');
+  const performedAt = formDateTimeStringForTimeZone(formData, 'performedAt', tenantTimeZone);
 
   if (!tenantId) {
     redirect('/super/tenants');
@@ -677,6 +704,9 @@ export async function updateServiceRecordAction(formData: FormData) {
     const record = store.serviceRecords.find((item) => item.id === recordId && item.tenantId === tenantId);
     if (!record) {
       throw new Error('Service record not found.');
+    }
+    if (record.voidedAt) {
+      throw new Error('This sale has already been removed from the ledger.');
     }
 
     const tenantUsers = store.users.filter((user) => user.tenantId === tenantId);
@@ -728,6 +758,36 @@ export async function updateServiceRecordAction(formData: FormData) {
   touchShopPaths();
   revalidatePath(`/app/receipts/${recordId}`);
   redirect(redirectTo);
+}
+
+export async function deleteServiceRecordAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) {
+    redirect('/super/tenants');
+  }
+
+  const recordId = formString(formData, 'recordId');
+  const reason = formString(formData, 'reason') || 'Duplicate or mistaken sale entry removed from the ledger.';
+
+  const result = await updateStore((store) =>
+    voidServiceRecord(store, {
+      tenantId: session.tenant!.id,
+      recordId,
+      userId: session.user.id,
+      reason,
+    }),
+  );
+
+  if (result.status === 'missing') {
+    redirect('/app/sales?error=record-missing');
+  }
+
+  touchShopPaths();
+  if (result.nextRecordId) {
+    redirect(`/app/sales?recordId=${result.nextRecordId}&success=record-deleted`);
+  }
+
+  redirect('/app/sales?success=record-deleted');
 }
 
 export async function addServiceAction(formData: FormData) {

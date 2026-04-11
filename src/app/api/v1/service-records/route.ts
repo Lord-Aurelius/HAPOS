@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { apiBadRequest, apiCreated, apiOk } from '@/server/http/api';
+import { parseDateTimeInputValue } from '@/lib/date-time';
 import { requireSession } from '@/server/auth/demo-session';
 import { calculateCommission, listServiceRecords } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
@@ -24,6 +25,19 @@ export async function POST(request: Request) {
     return apiCreated(null);
   }
   const body = await request.json();
+  const timeZone =
+    typeof body?.timeZone === 'string' && body.timeZone.trim()
+      ? body.timeZone.trim()
+      : session.tenant.timezone || 'UTC';
+  const performedAt =
+    typeof body?.performedAt === 'string' && body.performedAt.trim()
+      ? parseDateTimeInputValue(body.performedAt, timeZone)
+      : null;
+
+  if (body?.performedAt && !performedAt) {
+    return apiBadRequest('performedAt must be a valid ISO date-time or datetime-local value.');
+  }
+
   const result = await updateStore((store) => {
     const requestedStaffId = session.user.role === 'staff' ? session.user.id : String(body?.staffId ?? '');
     const staff = store.users.find(
@@ -72,10 +86,13 @@ export async function POST(request: Request) {
       commissionValue: commission.commissionValue,
       commissionAmount: commission.commissionAmount,
       productUsages: [],
-      performedAt: body.performedAt ?? new Date().toISOString(),
+      performedAt: performedAt ?? new Date().toISOString(),
       recordedBy: session.user.id,
       correctedAt: null,
       correctedBy: null,
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
       createdAt: new Date().toISOString(),
     };
     store.serviceRecords.push(record);

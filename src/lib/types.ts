@@ -126,6 +126,10 @@ export type ServiceRecord = {
   correctedAt?: string | null;
   correctedBy?: string | null;
   correctedByName?: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidedByName?: string | null;
+  voidReason?: string | null;
 };
 
 export type CustomerOrder = {

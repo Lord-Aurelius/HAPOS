@@ -1,6 +1,10 @@
 :root {
   --font-body: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
   --font-heading: "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
   --bg: #eef6fb;
   --bg-strong: #dceff7;
   --surface: rgba(255, 255, 255, 0.88);
@@ -28,6 +32,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(36, 150, 216, 0.22), transparent 28%),
     radial-gradient(circle at top right, rgba(20, 140, 107, 0.16), transparent 22%),
@@ -58,7 +63,7 @@ textarea {
   position: sticky;
   top: 0;
   height: 100vh;
-  padding: 28px;
+  padding: calc(28px + var(--safe-top)) calc(28px + var(--safe-right)) calc(28px + var(--safe-bottom)) calc(28px + var(--safe-left));
   background:
     radial-gradient(circle at top, rgba(36, 150, 216, 0.2), transparent 30%),
     linear-gradient(180deg, rgba(5, 20, 27, 0.98), rgba(12, 39, 51, 0.96));
@@ -240,7 +245,12 @@ textarea {
 }
 
 .workspace {
-  padding: clamp(16px, 2vw, 26px);
+  --workspace-gap: clamp(16px, 2vw, 26px);
+  padding:
+    calc(var(--workspace-gap) + var(--safe-top))
+    calc(var(--workspace-gap) + var(--safe-right))
+    calc(var(--workspace-gap) + var(--safe-bottom))
+    calc(var(--workspace-gap) + var(--safe-left));
 }
 
 .workspace-inner {
@@ -316,11 +326,23 @@ textarea {
   box-shadow: 0 16px 28px rgba(36, 150, 216, 0.22);
 }
 
+.button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+  box-shadow: none;
+}
+
 .button.secondary {
   border-color: var(--line);
   background: rgba(255, 255, 255, 0.78);
   color: var(--text);
   box-shadow: none;
+}
+
+.button.danger {
+  background: var(--danger);
+  box-shadow: 0 12px 24px rgba(178, 77, 65, 0.18);
 }
 
 .dashboard-grid {
@@ -1021,13 +1043,14 @@ textarea {
   .mobile-sidebar-trigger {
     display: inline-flex;
     position: fixed;
-    left: 18px;
-    bottom: 18px;
+    left: calc(18px + var(--safe-left));
+    bottom: calc(18px + var(--safe-bottom));
     z-index: 72;
     align-items: center;
     justify-content: center;
     min-height: 52px;
     padding: 0 18px;
+    max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 36px);
     border: 1px solid rgba(8, 40, 54, 0.12);
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.94);
@@ -1058,6 +1081,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .workspace {
+    padding-bottom: calc(96px + var(--safe-bottom));
+  }
+
   .workspace-topbar,
   .workspace-topbar-main {
     align-items: start;
@@ -1079,7 +1106,12 @@ textarea {
   .workspace,
   .login-poster,
   .login-form {
-    padding: 18px;
+    --workspace-gap: 18px;
+    padding:
+      calc(18px + var(--safe-top))
+      calc(18px + var(--safe-right))
+      calc(18px + var(--safe-bottom))
+      calc(18px + var(--safe-left));
   }
 
   .login-shell {
@@ -1122,6 +1154,16 @@ textarea {
   .workspace-topbar-actions .pill {
     width: 100%;
     justify-content: center;
+  }
+
+  .hero-actions {
+    width: 100%;
+  }
+
+  .hero-actions .button,
+  .hero-actions form,
+  .hero-actions form .button {
+    width: 100%;
   }
 
   .hero-title {

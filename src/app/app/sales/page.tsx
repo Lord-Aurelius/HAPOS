@@ -1,19 +1,20 @@
 import Link from 'next/link';
 
+import { FormSubmitButton } from '@/components/ui/form-submit-button';
+import { toDateTimeInputValue } from '@/lib/date-time';
 import { formatCurrency, formatDateTime } from '@/lib/format';
-import { approveCustomerOrderToSalesAction, updateCustomerOrderStatusAction, updateServiceRecordAction } from '@/server/actions/hapos';
+import {
+  approveCustomerOrderToSalesAction,
+  deleteServiceRecordAction,
+  updateCustomerOrderStatusAction,
+  updateServiceRecordAction,
+} from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
 import { listAllCustomers, listCustomerOrders, listProducts, listServiceRecords, listServices, listUsers } from '@/server/services/app-data';
 
 type SalesPageProps = {
   searchParams: Promise<{ recordId?: string; success?: string; error?: string }>;
 };
-
-function toDateTimeLocalValue(iso: string) {
-  const date = new Date(iso);
-  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return adjusted.toISOString().slice(0, 16);
-}
 
 function getMessage(params: { success?: string; error?: string }) {
   if (params.error === 'custom-service') {
@@ -22,6 +23,10 @@ function getMessage(params: { success?: string; error?: string }) {
 
   if (params.error === 'invalid-date') {
     return 'Enter a valid service date and time before saving.';
+  }
+
+  if (params.error === 'record-missing') {
+    return 'That sale could not be found. It may already have been removed from the ledger.';
   }
 
   if (params.error === 'approval-invalid-date') {
@@ -42,6 +47,10 @@ function getMessage(params: { success?: string; error?: string }) {
 
   if (params.success === 'record-updated') {
     return 'Sale correction saved. Dashboard, commissions, and reports now reflect the change.';
+  }
+
+  if (params.success === 'record-deleted') {
+    return 'Sale removed from the active ledger. Reports no longer count it, and any linked booking has been returned for admin approval.';
   }
 
   if (params.success === 'request-approved') {
@@ -141,6 +150,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
                 <form action={approveCustomerOrderToSalesAction} className="field-grid">
                   <input type="hidden" name="orderId" value={order.id} />
+                  <input type="hidden" name="tenantTimeZone" value={tenant.timezone} />
 
                   <div className="field">
                     <label htmlFor={`approvalStaff-${order.id}`}>Staff member</label>
@@ -159,7 +169,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                       id={`approvalPerformedAt-${order.id}`}
                       name="performedAt"
                       type="datetime-local"
-                      defaultValue={toDateTimeLocalValue(order.requestedAt)}
+                      defaultValue={toDateTimeInputValue(order.requestedAt, tenant.timezone)}
                     />
                   </div>
 
@@ -174,9 +184,9 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                   </div>
 
                   <div className="hero-actions">
-                    <button type="submit" className="button">
+                    <FormSubmitButton type="submit" className="button" pendingLabel="Approving...">
                       Approve to sales ledger
-                    </button>
+                    </FormSubmitButton>
                   </div>
                 </form>
 
@@ -184,9 +194,9 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                   <input type="hidden" name="orderId" value={order.id} />
                   <input type="hidden" name="nextStatus" value="cancelled" />
                   <input type="hidden" name="redirectTo" value="/app/sales?success=request-cancelled" />
-                  <button type="submit" className="button secondary">
+                  <FormSubmitButton type="submit" className="button secondary" pendingLabel="Cancelling...">
                     Cancel booking
-                  </button>
+                  </FormSubmitButton>
                 </form>
               </article>
             ))}
@@ -284,6 +294,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
               <form action={updateServiceRecordAction} className="field-grid">
                 <input type="hidden" name="recordId" value={selectedRecord.id} />
                 <input type="hidden" name="tenantId" value={tenant.id} />
+                <input type="hidden" name="tenantTimeZone" value={tenant.timezone} />
                 <input type="hidden" name="redirectTo" value={`/app/sales?recordId=${selectedRecord.id}&success=record-updated`} />
 
                 <div className="field">
@@ -312,7 +323,12 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                 </div>
                 <div className="field">
                   <label htmlFor="performedAt">Service date and time</label>
-                  <input id="performedAt" name="performedAt" type="datetime-local" defaultValue={toDateTimeLocalValue(selectedRecord.performedAt)} />
+                  <input
+                    id="performedAt"
+                    name="performedAt"
+                    type="datetime-local"
+                    defaultValue={toDateTimeInputValue(selectedRecord.performedAt, tenant.timezone)}
+                  />
                 </div>
                 <div className="field">
                   <label htmlFor="serviceMode">Service source</label>
@@ -383,13 +399,21 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                   <textarea id="description" name="description" defaultValue={selectedRecord.description ?? ''} />
                 </div>
                 <div className="hero-actions">
-                  <button type="submit" className="button">
+                  <FormSubmitButton type="submit" className="button" pendingLabel="Saving correction...">
                     Save correction
-                  </button>
+                  </FormSubmitButton>
                   <Link href={`/app/receipts/${selectedRecord.id}`} className="button secondary">
                     Open printable receipt
                   </Link>
                 </div>
+              </form>
+
+              <form action={deleteServiceRecordAction}>
+                <input type="hidden" name="recordId" value={selectedRecord.id} />
+                <input type="hidden" name="reason" value="Duplicate or mistaken sale entry removed from the ledger." />
+                <FormSubmitButton type="submit" className="button danger" pendingLabel="Removing sale...">
+                  Delete this sale from the ledger
+                </FormSubmitButton>
               </form>
             </div>
           ) : (

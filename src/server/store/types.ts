@@ -126,6 +126,9 @@ export type StoreServiceRecord = {
   recordedBy: string;
   correctedAt?: string | null;
   correctedBy?: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
   createdAt: string;
 };
 

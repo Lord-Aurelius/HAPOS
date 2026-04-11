@@ -1,6 +1,7 @@
 import { listCustomers, listServiceRecords, listSubscriptions, listTenants, listUsers } from '@/server/services/app-data';
 import { getSubscriptionDisplayName } from '@/lib/plans';
 import { readStore } from '@/server/store';
+import { isActiveServiceRecord } from '@/server/store/service-records';
 
 function sameUtcMonth(iso: string, now: Date) {
   const date = new Date(iso);
@@ -131,16 +132,18 @@ export async function buildTenantExportDocument(tenantId: string) {
       customerName: store.customers.find((item) => item.id === record.customerId)?.name ?? null,
       staffName: store.users.find((item) => item.id === record.staffId)?.fullName ?? null,
       correctedByName: record.correctedBy ? store.users.find((item) => item.id === record.correctedBy)?.fullName ?? null : null,
+      voidedByName: record.voidedBy ? store.users.find((item) => item.id === record.voidedBy)?.fullName ?? null : null,
     }));
+  const activeServiceRecords = serviceRecords.filter(isActiveServiceRecord);
   const expenses = store.expenses.filter((item) => item.tenantId === tenantId);
   const smsLogs = store.smsLogs.filter((item) => item.tenantId === tenantId);
   const commissionPayouts = store.commissionPayouts.filter((item) => item.tenantId === tenantId);
   const subscription = store.subscriptions.find((item) => item.tenantId === tenantId) ?? null;
 
-  const totalRevenue = serviceRecords.reduce((sum, record) => sum + record.price, 0);
+  const totalRevenue = activeServiceRecords.reduce((sum, record) => sum + record.price, 0);
   const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const totalCommissions = serviceRecords.reduce((sum, record) => sum + record.commissionAmount, 0);
-  const totalProductCosts = serviceRecords.reduce(
+  const totalCommissions = activeServiceRecords.reduce((sum, record) => sum + record.commissionAmount, 0);
+  const totalProductCosts = activeServiceRecords.reduce(
     (sum, record) => sum + record.productUsages.reduce((usageSum, usage) => usageSum + usage.quantity * usage.unitCost, 0),
     0,
   );
@@ -154,7 +157,7 @@ export async function buildTenantExportDocument(tenantId: string) {
       totalExpenses,
       totalCommissions,
       totalProductCosts,
-      serviceRecordCount: serviceRecords.length,
+      serviceRecordCount: activeServiceRecords.length,
       customerCount: customers.length,
       archivedCustomerCount: customers.filter((customer) => customer.archivedAt).length,
       marketplaceAdCount: marketplaceAds.length,
@@ -198,7 +201,7 @@ export async function buildTenantExportCsv(tenantId: string) {
   }
 
   const rows = [
-    'type,date,customer,staff,service_or_category,amount,commission,product_cost,notes,corrected_at,corrected_by',
+    'type,date,customer,staff,service_or_category,amount,commission,product_cost,notes,corrected_at,corrected_by,voided_at,voided_by,void_reason',
     ...store.serviceRecords
       .filter((item) => item.tenantId === tenantId)
       .map((record) => {
@@ -206,6 +209,7 @@ export async function buildTenantExportCsv(tenantId: string) {
         const staffName = store.users.find((item) => item.id === record.staffId)?.fullName ?? '';
         const productCost = record.productUsages.reduce((sum, usage) => sum + usage.quantity * usage.unitCost, 0);
         const correctedByName = record.correctedBy ? store.users.find((item) => item.id === record.correctedBy)?.fullName ?? '' : '';
+        const voidedByName = record.voidedBy ? store.users.find((item) => item.id === record.voidedBy)?.fullName ?? '' : '';
         return [
           'service',
           record.performedAt,
@@ -218,6 +222,9 @@ export async function buildTenantExportCsv(tenantId: string) {
           (record.description ?? '').replace(/,/g, ';'),
           record.correctedAt ?? '',
           correctedByName,
+          record.voidedAt ?? '',
+          voidedByName,
+          (record.voidReason ?? '').replace(/,/g, ';'),
         ].join(',');
       }),
     ...store.expenses

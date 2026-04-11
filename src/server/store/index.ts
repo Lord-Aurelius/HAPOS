@@ -23,6 +23,7 @@ import { getPool } from '@/server/db/client';
 import { getRuntimeBackend } from '@/server/runtime';
 import { createSeedStore } from '@/server/store/seed';
 import { verifyPassword } from '@/server/store/passwords';
+import { isActiveServiceRecord } from '@/server/store/service-records';
 import type {
   StoreCustomer,
   StoreCustomerSession,
@@ -306,6 +307,18 @@ function migrateStoreState(parsed: StoreState) {
     }
     if (!('correctedBy' in record)) {
       record.correctedBy = null;
+      changed = true;
+    }
+    if (!('voidedAt' in record)) {
+      record.voidedAt = null;
+      changed = true;
+    }
+    if (!('voidedBy' in record)) {
+      record.voidedBy = null;
+      changed = true;
+    }
+    if (!('voidReason' in record)) {
+      record.voidReason = null;
       changed = true;
     }
   }
@@ -665,6 +678,10 @@ function recordFromStore(
     correctedAt: record.correctedAt,
     correctedBy: record.correctedBy,
     correctedByName: record.correctedBy ? users.find((item) => item.id === record.correctedBy)?.fullName : null,
+    voidedAt: record.voidedAt,
+    voidedBy: record.voidedBy,
+    voidedByName: record.voidedBy ? users.find((item) => item.id === record.voidedBy)?.fullName : null,
+    voidReason: record.voidReason,
   };
 }
 
@@ -735,7 +752,9 @@ export async function listSubscriptionPackagesStore() {
 
 export async function listCustomersByTenant(tenantId: string) {
   const store = await readStore();
-  const records = store.serviceRecords.filter((record) => record.tenantId === tenantId);
+  const records = store.serviceRecords
+    .filter((record) => record.tenantId === tenantId)
+    .filter(isActiveServiceRecord);
 
   return store.customers
     .filter((customer) => customer.tenantId === tenantId && !customer.archivedAt)
@@ -744,7 +763,9 @@ export async function listCustomersByTenant(tenantId: string) {
 
 export async function listAllCustomersByTenant(tenantId: string) {
   const store = await readStore();
-  const records = store.serviceRecords.filter((record) => record.tenantId === tenantId);
+  const records = store.serviceRecords
+    .filter((record) => record.tenantId === tenantId)
+    .filter(isActiveServiceRecord);
 
   return store.customers
     .filter((customer) => customer.tenantId === tenantId)
@@ -755,6 +776,7 @@ export async function listRecordsByTenant(tenantId: string) {
   const store = await readStore();
   return store.serviceRecords
     .filter((record) => record.tenantId === tenantId)
+    .filter(isActiveServiceRecord)
     .sort((a, b) => b.performedAt.localeCompare(a.performedAt))
     .map((record) => recordFromStore(record, store.users, store.customers, store.products));
 }
@@ -943,7 +965,9 @@ export async function getCustomerSession(sessionId: string): Promise<CustomerApp
   const subscriptionPackage = subscription
     ? store.subscriptionPackages.find((item) => item.id === subscription.packageId || item.code === subscription.planCode) ?? null
     : null;
-  const records = store.serviceRecords.filter((record) => record.tenantId === session.tenantId);
+  const records = store.serviceRecords
+    .filter((record) => record.tenantId === session.tenantId)
+    .filter(isActiveServiceRecord);
 
   return {
     sessionId: session.id,

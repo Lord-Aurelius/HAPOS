@@ -1,3 +1,5 @@
+import { FormSubmitButton } from '@/components/ui/form-submit-button';
+import { toDateTimeInputValue } from '@/lib/date-time';
 import { formatCurrency } from '@/lib/format';
 import { recordServiceAction, updateCustomerOrderStatusAction } from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
@@ -43,6 +45,8 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
               ? 'Enter a custom service name and price before saving.'
               : params.error === 'customer-required'
                 ? 'Enter the customer name and phone number before saving.'
+              : params.error === 'invalid-date'
+                ? 'Enter a valid date and time, or leave it blank to record the sale right now.'
               : params.error === 'no-services'
                 ? 'This shop has no price-list services yet. Use Custom service for now or add services first.'
                 : params.error === 'staff-not-found'
@@ -79,6 +83,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
           </div>
 
           <form action={recordServiceAction} className="field-grid">
+            <input type="hidden" name="tenantTimeZone" value={tenant.timezone} />
             <div className="field">
               <label htmlFor="customerName">Customer name</label>
               <input id="customerName" name="customerName" placeholder="Kevin Mwangi" required />
@@ -112,7 +117,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                 {services.length > 0 ? (
                   services.map((service) => (
                   <option key={service.id} value={service.id}>
-                    {service.name} · {formatCurrency(service.price)}
+                    {service.name} / {formatCurrency(service.price)}
                   </option>
                   ))
                 ) : (
@@ -134,7 +139,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                 <option value="">No product recorded</option>
                 {products.map((product) => (
                   <option key={product.id} value={product.id}>
-                    {product.name} · {formatCurrency(product.unitCost)}
+                    {product.name} / {formatCurrency(product.unitCost)}
                   </option>
                 ))}
               </select>
@@ -147,10 +152,22 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
               <label htmlFor="description">Service notes</label>
               <textarea id="description" name="description" placeholder="Low fade and beard line-up" />
             </div>
+            <div className="field">
+              <label htmlFor="performedAt">Service date and time</label>
+              <input
+                id="performedAt"
+                name="performedAt"
+                type="datetime-local"
+                defaultValue={toDateTimeInputValue(new Date().toISOString(), tenant.timezone)}
+              />
+              <div className="field-hint">
+                Use the actual time the sale happened. You can backfill yesterday's work or older sales here.
+              </div>
+            </div>
             <div className="hero-actions">
-              <button type="submit" className="button">
+              <FormSubmitButton type="submit" className="button" pendingLabel="Saving service...">
                 Save service
-              </button>
+              </FormSubmitButton>
             </div>
           </form>
         </section>
@@ -207,55 +224,48 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
         </div>
 
         {customerOrders.length > 0 ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Requested service</th>
-                <th>Preferred staff</th>
-                <th>Notes</th>
-                <th>Requested</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {customerOrders.map((order) => (
-                <tr key={order.id}>
-                  <td>
+          <div className="stack">
+            {customerOrders.map((order) => (
+              <article key={order.id} className="ledger-card">
+                <div className="ledger-card-top">
+                  <div>
                     <strong>{order.customerName}</strong>
                     <div className="eyebrow">{order.customerPhone}</div>
-                  </td>
-                  <td>
+                  </div>
+                  <strong>{formatCurrency(order.quotedPrice, tenant.currencyCode)}</strong>
+                </div>
+
+                <div className="list-row">
+                  <div>
                     <strong>{order.serviceName}</strong>
-                    <div className="eyebrow">{formatCurrency(order.quotedPrice, tenant.currencyCode)}</div>
-                  </td>
-                  <td>{order.requestedStaffName || 'No preference'}</td>
-                  <td>{order.notes || 'No notes'}</td>
-                  <td>{order.requestedAt.slice(0, 16).replace('T', ' ')}</td>
-                  <td>
-                    <div style={{ display: 'grid', gap: 8 }}>
-                      <form action={updateCustomerOrderStatusAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
-                        <input type="hidden" name="nextStatus" value="acknowledged" />
-                        <input type="hidden" name="redirectTo" value="/app/service-entry?success=request-updated" />
-                        <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
-                          Send to admin approval
-                        </button>
-                      </form>
-                      <form action={updateCustomerOrderStatusAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
-                        <input type="hidden" name="nextStatus" value="cancelled" />
-                        <input type="hidden" name="redirectTo" value="/app/service-entry?success=request-updated" />
-                        <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
-                          Cancel
-                        </button>
-                      </form>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <div className="eyebrow">{order.requestedStaffName || 'No staff preference'}</div>
+                  </div>
+                  <div className="eyebrow">{order.requestedAt.slice(0, 16).replace('T', ' ')}</div>
+                </div>
+
+                <div className="eyebrow">{order.notes || 'No notes were left on this booking request.'}</div>
+
+                <div className="hero-actions" style={{ marginTop: 0 }}>
+                  <form action={updateCustomerOrderStatusAction}>
+                    <input type="hidden" name="orderId" value={order.id} />
+                    <input type="hidden" name="nextStatus" value="acknowledged" />
+                    <input type="hidden" name="redirectTo" value="/app/service-entry?success=request-updated" />
+                    <FormSubmitButton type="submit" className="button secondary" pendingLabel="Sending...">
+                      Send to admin approval
+                    </FormSubmitButton>
+                  </form>
+                  <form action={updateCustomerOrderStatusAction}>
+                    <input type="hidden" name="orderId" value={order.id} />
+                    <input type="hidden" name="nextStatus" value="cancelled" />
+                    <input type="hidden" name="redirectTo" value="/app/service-entry?success=request-updated" />
+                    <FormSubmitButton type="submit" className="button secondary" pendingLabel="Cancelling...">
+                      Cancel
+                    </FormSubmitButton>
+                  </form>
+                </div>
+              </article>
+            ))}
+          </div>
         ) : (
           <div className="eyebrow">No pending requests from customers right now.</div>
         )}
