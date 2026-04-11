@@ -6,6 +6,7 @@
     "dev": "node scripts/hapos-local-dev-server.js",
     "dev:next": "next dev --webpack",
     "build": "next build --webpack",
+    "build:static": "node scripts/hapos-next.js build --webpack --static",
     "start": "next start",
     "db:bootstrap": "node scripts/hapos-db-bootstrap.js",
     "lint": "npm run typecheck",
