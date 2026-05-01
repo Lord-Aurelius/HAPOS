@@ -45,7 +45,13 @@ export default async function CustomerMarketplacePage() {
               <article className="marketplace-card" key={advert.id}>
                 {advert.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={advert.imageUrl} alt={advert.title} className="marketplace-card-image" />
+                  <img
+                    src={advert.imageUrl}
+                    alt={advert.title}
+                    className="marketplace-card-image"
+                    loading="lazy"
+                    decoding="async"
+                  />
                 ) : (
                   <div className="marketplace-card-placeholder">Marketplace advert</div>
                 )}

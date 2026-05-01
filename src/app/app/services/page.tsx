@@ -114,7 +114,13 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
               <div className="service-card-media">
                 {service.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={service.imageUrl} alt={service.name} className="service-card-image" />
+                  <img
+                    src={service.imageUrl}
+                    alt={service.name}
+                    className="service-card-image"
+                    loading="lazy"
+                    decoding="async"
+                  />
                 ) : (
                   <div className="service-card-placeholder">No photo yet</div>
                 )}

@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 
 import { parseDateTimeInputValue } from '@/lib/date-time';
 import { isPlatinumPlan, normalizePlanCode } from '@/lib/plans';
+import { storeImageAsset } from '@/server/assets';
 import { getAccessState } from '@/server/auth/access';
 import { signInCustomerSession, signOutCustomerSession } from '@/server/auth/customer-session';
 import { requireSession, signInSession, signOutSession } from '@/server/auth/demo-session';
@@ -90,9 +91,9 @@ function normalizeLoyaltyRewardType(value: string) {
   return value === 'subsidized_service' ? 'subsidized_service' : 'free_service';
 }
 
-const MAX_INLINE_IMAGE_BYTES = 1_500_000;
+const MAX_UPLOADED_IMAGE_BYTES = 1_500_000;
 
-async function storeUploadedImage(file: File | null) {
+async function storeUploadedImage(file: File | null, assetPrefix: string) {
   if (!file || file.size === 0) {
     return null;
   }
@@ -101,27 +102,28 @@ async function storeUploadedImage(file: File | null) {
     throw new Error('Uploads must be image files.');
   }
 
-  if (file.size > MAX_INLINE_IMAGE_BYTES) {
+  if (file.size > MAX_UPLOADED_IMAGE_BYTES) {
     throw new Error('Uploads must stay under 1.5 MB.');
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  return `data:${file.type || 'image/png'};base64,${bytes.toString('base64')}`;
+  return storeImageAsset({
+    bytes,
+    mimeType: file.type || 'image/png',
+    assetPrefix,
+  });
 }
 
 async function storeTenantLogo(file: File | null, tenantId: string) {
-  void tenantId;
-  return storeUploadedImage(file);
+  return storeUploadedImage(file, `tenant-${tenantId}`);
 }
 
 async function storeServiceImage(file: File | null, serviceId: string) {
-  void serviceId;
-  return storeUploadedImage(file);
+  return storeUploadedImage(file, `service-${serviceId}`);
 }
 
 async function storeMarketplaceImage(file: File | null, adId: string) {
-  void adId;
-  return storeUploadedImage(file);
+  return storeUploadedImage(file, `advert-${adId}`);
 }
 
 function formDateTimeString(formData: FormData, key: string) {

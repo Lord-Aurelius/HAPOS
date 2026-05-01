@@ -273,8 +273,17 @@ export type DashboardSummary = {
   recentServices: ServiceRecord[];
 };
 
-export type MonthlyReport = {
+export type ReportMonthOption = {
+  monthKey: string;
   monthLabel: string;
+};
+
+export type MonthlyReport = {
+  monthKey: string;
+  monthLabel: string;
+  previousMonthKey: string | null;
+  nextMonthKey: string | null;
+  availableMonths: ReportMonthOption[];
   topCustomerByVisits: {
     customer: Customer;
     visits: number;

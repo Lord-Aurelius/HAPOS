@@ -12,6 +12,7 @@ import type {
   MonthlyContributionPoint,
   MonthlyReport,
   Product,
+  ReportMonthOption,
   Service,
   ServiceRecord,
   SmsLog,
@@ -64,40 +65,138 @@ function addUtcMonths(value: Date, delta: number) {
   return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + delta, 1));
 }
 
+function toMonthKey(value: Date) {
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function parseMonthKey(value: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month] = match;
+  return new Date(Date.UTC(Number(year), Number(month) - 1, 1));
+}
+
+function toMonthKeyFromIso(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return toMonthKey(date);
+}
+
+function buildAvailableReportMonths(
+  records: ServiceRecord[],
+  expenses: Expense[],
+  selectedMonth: Date,
+): ReportMonthOption[] {
+  const monthKeys = new Set<string>([toMonthKey(new Date()), toMonthKey(selectedMonth)]);
+
+  for (const record of records) {
+    const monthKey = toMonthKeyFromIso(record.performedAt);
+    if (monthKey) {
+      monthKeys.add(monthKey);
+    }
+  }
+
+  for (const expense of expenses) {
+    const monthKey = expense.expenseDate.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(monthKey)) {
+      monthKeys.add(monthKey);
+    }
+  }
+
+  return Array.from(monthKeys)
+    .sort((a, b) => b.localeCompare(a))
+    .map((monthKey) => ({
+      monthKey,
+      monthLabel: startOfMonthLabel(parseMonthKey(monthKey) ?? selectedMonth),
+    }));
+}
+
 function getProductCost(record: ServiceRecord) {
   return (record.productUsages ?? []).reduce((sum, usage) => sum + usage.totalCost, 0);
 }
 
 function buildMonthlyContribution(records: ServiceRecord[], now: Date, monthCount = 6): MonthlyContributionPoint[] {
+  const monthMap = new Map<
+    string,
+    {
+      revenue: number;
+      commission: number;
+      services: number;
+      clients: Set<string>;
+    }
+  >();
+
+  for (const record of records) {
+    const monthKey = toMonthKeyFromIso(record.performedAt);
+    if (!monthKey) {
+      continue;
+    }
+
+    const snapshot = monthMap.get(monthKey) ?? {
+      revenue: 0,
+      commission: 0,
+      services: 0,
+      clients: new Set<string>(),
+    };
+    snapshot.revenue += record.price;
+    snapshot.commission += record.commission;
+    snapshot.services += 1;
+    snapshot.clients.add(record.customerId);
+    monthMap.set(monthKey, snapshot);
+  }
+
   return Array.from({ length: monthCount }, (_, index) => {
     const targetMonth = addUtcMonths(now, -index);
-    const monthRecords = records.filter((record) => sameUtcMonth(record.performedAt, targetMonth));
+    const monthKey = toMonthKey(targetMonth);
+    const snapshot = monthMap.get(monthKey);
 
     return {
-      monthKey: `${targetMonth.getUTCFullYear()}-${String(targetMonth.getUTCMonth() + 1).padStart(2, '0')}`,
+      monthKey,
       monthLabel: startOfMonthLabel(targetMonth),
-      revenue: monthRecords.reduce((sum, record) => sum + record.price, 0),
-      commission: monthRecords.reduce((sum, record) => sum + record.commission, 0),
-      services: monthRecords.length,
-      clients: new Set(monthRecords.map((record) => record.customerId)).size,
+      revenue: snapshot?.revenue ?? 0,
+      commission: snapshot?.commission ?? 0,
+      services: snapshot?.services ?? 0,
+      clients: snapshot?.clients.size ?? 0,
     };
   });
 }
 
 function buildStaffPerformance(users: User[], records: ServiceRecord[]): StaffPerformance[] {
-  return users
+  const performance = users
     .filter((user) => user.role === 'staff' || user.role === 'shop_admin')
-    .map((user) => {
-      const rows = records.filter((record) => record.staffId === user.id);
-      return {
-        staffId: user.id,
-        staffName: user.fullName,
-        totalServices: rows.length,
-        totalRevenue: rows.reduce((sum, row) => sum + row.price, 0),
-        totalCommission: rows.reduce((sum, row) => sum + row.commission, 0),
-        clientCount: new Set(rows.map((row) => row.customerId)).size,
-      };
-    })
+    .map((user) => ({
+      staffId: user.id,
+      staffName: user.fullName,
+      totalServices: 0,
+      totalRevenue: 0,
+      totalCommission: 0,
+      clientIds: new Set<string>(),
+    }));
+  const performanceMap = new Map(performance.map((row) => [row.staffId, row]));
+
+  for (const record of records) {
+    const row = performanceMap.get(record.staffId);
+    if (!row) {
+      continue;
+    }
+
+    row.totalServices += 1;
+    row.totalRevenue += record.price;
+    row.totalCommission += record.commission;
+    row.clientIds.add(record.customerId);
+  }
+
+  return performance
+    .map(({ clientIds, ...row }) => ({
+      ...row,
+      clientCount: clientIds.size,
+    }))
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 }
 
@@ -587,25 +686,42 @@ export async function listCustomerLoyaltyProgress(tenantId: string) {
 
 export async function getMonthlyReport(tenantId: string, month = new Date()): Promise<MonthlyReport> {
   const [customers, records, expenses, users] = await Promise.all([
-    listCustomers(tenantId),
+    listAllCustomers(tenantId),
     listServiceRecords(tenantId),
     listExpenses(tenantId),
     listUsers(tenantId),
   ]);
 
+  const monthKey = toMonthKey(month);
   const monthRecords = records.filter((record) => sameUtcMonth(record.performedAt, month));
   const monthExpenses = expenses.filter((expense) => sameUtcMonth(`${expense.expenseDate}T00:00:00.000Z`, month));
   const performance = buildStaffPerformance(users, monthRecords);
+  const availableMonths = buildAvailableReportMonths(records, expenses, month);
+  const selectedMonthIndex = availableMonths.findIndex((option) => option.monthKey === monthKey);
 
-  const rankedCustomers = customers
-    .map((customer) => {
-      const customerRecords = monthRecords.filter((record) => record.customerId === customer.id);
-      return {
+  const customerSnapshots = new Map(
+    customers.map((customer) => [
+      customer.id,
+      {
         customer,
-        visits: customerRecords.length,
-        spent: customerRecords.reduce((sum, record) => sum + record.price, 0),
-      };
-    })
+        visits: 0,
+        spent: 0,
+      },
+    ]),
+  );
+
+  for (const record of monthRecords) {
+    const snapshot = customerSnapshots.get(record.customerId);
+    if (!snapshot) {
+      continue;
+    }
+
+    snapshot.visits += 1;
+    snapshot.spent += record.price;
+  }
+
+  const rankedCustomers = Array.from(customerSnapshots.values())
+    .filter((snapshot) => snapshot.visits > 0 || snapshot.spent > 0)
     .sort((a, b) => b.visits - a.visits || b.spent - a.spent);
   const topCustomerByVisits = rankedCustomers[0] ?? null;
   const topCustomerBySpend = [...rankedCustomers].sort((a, b) => b.spent - a.spent)[0] ?? null;
@@ -665,7 +781,14 @@ export async function getMonthlyReport(tenantId: string, month = new Date()): Pr
   }
 
   return {
+    monthKey,
     monthLabel: startOfMonthLabel(month),
+    previousMonthKey:
+      selectedMonthIndex >= 0 && selectedMonthIndex < availableMonths.length - 1
+        ? availableMonths[selectedMonthIndex + 1].monthKey
+        : null,
+    nextMonthKey: selectedMonthIndex > 0 ? availableMonths[selectedMonthIndex - 1].monthKey : null,
+    availableMonths,
     topCustomerByVisits: topCustomerByVisits
       ? {
           customer: topCustomerByVisits.customer,

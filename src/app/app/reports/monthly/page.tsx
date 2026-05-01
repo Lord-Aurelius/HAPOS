@@ -6,13 +6,35 @@ import { formatCurrency } from '@/lib/format';
 import { requireSession } from '@/server/auth/demo-session';
 import { getMonthlyReport } from '@/server/services/app-data';
 
-export default async function MonthlyReportPage() {
+type MonthlyReportPageProps = {
+  searchParams: Promise<{ month?: string }>;
+};
+
+function parseRequestedMonth(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = /^(\d{4})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month] = match;
+  return new Date(Date.UTC(Number(year), Number(month) - 1, 1));
+}
+
+export default async function MonthlyReportPage({ searchParams }: MonthlyReportPageProps) {
   const session = await requireSession(['shop_admin', 'super_admin']);
   if (!session.tenant) {
     return null;
   }
 
-  const report = await getMonthlyReport(session.tenant.id);
+  const params = await searchParams;
+  const selectedMonth = parseRequestedMonth(params.month) ?? new Date();
+  const report = await getMonthlyReport(session.tenant.id, selectedMonth);
+  const firstAvailableMonth = report.availableMonths[report.availableMonths.length - 1]?.monthKey;
+  const latestAvailableMonth = report.availableMonths[0]?.monthKey;
 
   return (
     <>
@@ -28,6 +50,38 @@ export default async function MonthlyReportPage() {
         <p className="hero-subtitle">
           HAPOS compiles loyal-customer insight, staff ranking, expenses, product costs, and operational remarks for each tenant in isolation.
         </p>
+        <div className="month-report-toolbar">
+          <form method="get" className="month-report-form">
+            <div className="field">
+              <label htmlFor="report-month">Choose report month</label>
+              <input
+                id="report-month"
+                name="month"
+                type="month"
+                defaultValue={report.monthKey}
+                min={firstAvailableMonth}
+                max={latestAvailableMonth}
+              />
+            </div>
+            <button type="submit" className="button">
+              Open month
+            </button>
+          </form>
+
+          <div className="month-report-nav">
+            {report.previousMonthKey ? (
+              <Link href={`/app/reports/monthly?month=${report.previousMonthKey}`} className="button secondary">
+                Previous month
+              </Link>
+            ) : null}
+            {report.nextMonthKey ? (
+              <Link href={`/app/reports/monthly?month=${report.nextMonthKey}`} className="button secondary">
+                Next month
+              </Link>
+            ) : null}
+          </div>
+        </div>
+
         <div className="hero-actions">
           <PrintButton />
           <Link href="/api/v1/reports/export?format=json" className="button secondary">

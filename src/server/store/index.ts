@@ -18,6 +18,7 @@ import type {
   User,
 } from '@/lib/types';
 import { formatPlanCode, getDefaultSubscriptionPackageBlueprints, isPlatinumPlan, normalizePlanCode } from '@/lib/plans';
+import { normalizeStoreAssetReferences } from '@/server/assets';
 import { getDatabaseConfigHint } from '@/server/db/config';
 import { getPool } from '@/server/db/client';
 import { getRuntimeBackend } from '@/server/runtime';
@@ -384,8 +385,9 @@ async function readStoreFromFile(): Promise<StoreState> {
   const raw = await readFile(storePath, 'utf8');
   const parsed = JSON.parse(raw) as StoreState;
   const { store, changed } = migrateStoreState(parsed);
+  const assetsChanged = await normalizeStoreAssetReferences(store);
 
-  if (changed) {
+  if (changed || assetsChanged) {
     await writeStoreFile(store);
   }
 
@@ -419,7 +421,10 @@ async function loadRuntimeStoreForUpdate(client: PoolClient) {
     throw new Error('Could not initialize the Postgres-backed runtime store.');
   }
 
-  return migrateStoreState(parseRuntimeState(result.rows[0].state));
+  const { store, changed } = migrateStoreState(parseRuntimeState(result.rows[0].state));
+  const assetsChanged = await normalizeStoreAssetReferences(store, client);
+
+  return { store, changed: changed || assetsChanged };
 }
 
 async function readStoreFromPostgres(): Promise<StoreState> {
@@ -448,8 +453,9 @@ async function readStoreFromPostgres(): Promise<StoreState> {
     }
 
     const { store, changed } = migrateStoreState(parseRuntimeState(result.rows[0].state));
+    const assetsChanged = await normalizeStoreAssetReferences(store, client);
 
-    if (changed) {
+    if (changed || assetsChanged) {
       await client.query(
         'update app.runtime_state set state = $2::jsonb, version = version + 1, updated_at = now() where id = $1',
         [runtimeStoreId, JSON.stringify(store)],
