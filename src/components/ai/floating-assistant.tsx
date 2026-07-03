@@ -105,7 +105,7 @@ export function FloatingAssistant() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface, #f8f9fa)' }}>
-            <strong>HAPOS AI</strong>
+            <strong>AEGIS</strong>
             <button type="button" onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: 4 }} aria-label="Close assistant">✕</button>
           </div>
 
@@ -144,7 +144,7 @@ export function FloatingAssistant() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              placeholder="Ask HAPOS AI..."
+              placeholder="Ask AEGIS..."
               disabled={loading}
             />
             <button className="button" onClick={sendMessage} disabled={loading || !input.trim()} style={{ fontSize: '0.8rem', padding: '4px 12px' }}>

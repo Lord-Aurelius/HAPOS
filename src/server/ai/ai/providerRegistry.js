@@ -20,6 +20,9 @@ const SUPPORTED_PROVIDERS = Object.freeze([
   "anthropic",
   "groq",
   "ollama",
+  "gemma",
+  "qwen",
+  "custom",
 ]);
 
 const PROVIDER_FACTORIES = Object.freeze({
@@ -30,6 +33,24 @@ const PROVIDER_FACTORIES = Object.freeze({
   anthropic: createAnthropicProvider,
   groq: createGroqProvider,
   ollama: createOllamaProvider,
+  gemma: (cfg) => createOpenAIProvider({
+    ...cfg,
+    openaiApiKey: cfg.geminiApiKey || cfg.openaiApiKey || "",
+    openaiModel: cfg.ollamaModel || "gemma4:31b",
+    openaiBaseUrl: cfg.ollamaBaseUrl || "http://127.0.0.1:11434",
+  }),
+  qwen: (cfg) => createOpenAIProvider({
+    ...cfg,
+    openaiApiKey: cfg.openaiApiKey || "",
+    openaiModel: cfg.openaiModel || "qwen2.5:14b",
+    openaiBaseUrl: cfg.openaiBaseUrl || "http://127.0.0.1:11434",
+  }),
+  custom: (cfg) => createOpenAIProvider({
+    ...cfg,
+    openaiApiKey: cfg.openaiApiKey || "",
+    openaiModel: cfg.openaiModel || "custom-model",
+    openaiBaseUrl: cfg.openaiBaseUrl || "http://127.0.0.1:11434/v1",
+  }),
 });
 
 function normalizeProviderName(value) {
@@ -54,6 +75,9 @@ function getProviderApiKey(providerName, config) {
     anthropic: config.anthropicApiKey,
     groq: config.groqApiKey,
     ollama: "builtin",
+    gemma: config.geminiApiKey || config.openaiApiKey || "builtin",
+    qwen: config.openaiApiKey || "builtin",
+    custom: config.openaiApiKey || "builtin",
   };
   return keyMap[providerName] || "";
 }

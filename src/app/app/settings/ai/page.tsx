@@ -23,8 +23,8 @@ export default async function AiSettingsPage() {
       <section className="hero">
         <p className="hero-kicker">Artificial intelligence</p>
         <h1 className="hero-title">AI Business Intelligence settings.</h1>
-        <p className="hero-subtitle">
-          HAPOS AI analyses revenue, expenses, customers, services, and forecasts to help you run your business better.
+          <p className="hero-subtitle">
+          AEGIS analyses revenue, expenses, customers, services, and forecasts using your business data.
           Configure providers and models through environment variables &mdash; no code changes required.
         </p>
       </section>
@@ -89,7 +89,7 @@ export default async function AiSettingsPage() {
           </div>
         </div>
 
-        <table className="table">
+          <table className="table">
           <thead>
             <tr>
               <th>Variable</th>
@@ -98,16 +98,17 @@ export default async function AiSettingsPage() {
             </tr>
           </thead>
           <tbody>
-            <tr><td><code>AI_ENABLED</code></td><td>Set to "true" to enable AI</td><td>false</td></tr>
+            <tr><td><code>AI_ENABLED</code></td><td>Set to "true" to enable AEGIS</td><td>false</td></tr>
             <tr><td><code>AI_DEFAULT_PROVIDER</code></td><td>Default provider name</td><td>disabled</td></tr>
-            <tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI API key</td><td>—</td></tr>
-            <tr><td><code>OPENAI_MODEL</code></td><td>OpenAI model name</td><td>gpt-4o-mini</td></tr>
-            <tr><td><code>DEEPSEEK_API_KEY</code></td><td>DeepSeek API key</td><td>—</td></tr>
-            <tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
-            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Anthropic API key</td><td>—</td></tr>
-            <tr><td><code>GROQ_API_KEY</code></td><td>Groq API key</td><td>—</td></tr>
-            <tr><td><code>OLLAMA_BASE_URL</code></td><td>Ollama server URL</td><td>http://127.0.0.1:11434</td></tr>
-            <tr><td><code>OLLAMA_MODEL</code></td><td>Ollama model name</td><td>llama3</td></tr>
+            <tr><td><code>AI_OLLAMA_BASE_URL</code></td><td>Ollama server URL</td><td>http://127.0.0.1:11434</td></tr>
+            <tr><td><code>AI_OLLAMA_MODEL</code></td><td>Ollama model name</td><td>gemma4:31b</td></tr>
+            <tr><td><code>AI_OLLAMA_KEEP_ALIVE</code></td><td>Ollama keep-alive duration</td><td>5m</td></tr>
+            <tr><td><code>AI_OPENAI_API_KEY</code></td><td>OpenAI API key</td><td>—</td></tr>
+            <tr><td><code>AI_OPENAI_MODEL</code></td><td>OpenAI model name</td><td>gpt-4o-mini</td></tr>
+            <tr><td><code>AI_DEEPSEEK_API_KEY</code></td><td>DeepSeek API key</td><td>—</td></tr>
+            <tr><td><code>AI_GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
+            <tr><td><code>AI_ANTHROPIC_API_KEY</code></td><td>Anthropic API key</td><td>—</td></tr>
+            <tr><td><code>AI_GROQ_API_KEY</code></td><td>Groq API key</td><td>—</td></tr>
           </tbody>
         </table>
       </section>

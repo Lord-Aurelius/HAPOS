@@ -55,7 +55,7 @@ export default function AiChatPage() {
     <>
       <section className="hero">
         <p className="hero-kicker">AI assistant</p>
-        <h1 className="hero-title">Ask HAPOS AI about your business.</h1>
+        <h1 className="hero-title">Ask AEGIS about your business.</h1>
         <p className="hero-subtitle">
           Ask questions about revenue, expenses, customers, services, forecasts, risks, and opportunities.
           The AI uses your actual business data &mdash; never fabricated.

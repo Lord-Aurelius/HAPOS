@@ -5,8 +5,8 @@ const http = require("http");
 const { buildSystemMessage, buildDefaultMessages } = require("./providerUtils");
 
 function createOllamaProvider(config) {
-  const baseUrl = String(config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
-  const model = String(config.ollamaModel || process.env.OLLAMA_MODEL || "llama3").replace(/\/+$/, "");
+  const baseUrl = String(config.ollamaBaseUrl || process.env.AI_OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
+  const model = String(config.ollamaModel || process.env.AI_OLLAMA_MODEL || "gemma4:31b").replace(/\/+$/, "");
   const keepAlive = String(config.ollamaKeepAlive || process.env.OLLAMA_KEEP_ALIVE || "5m");
 
   return {

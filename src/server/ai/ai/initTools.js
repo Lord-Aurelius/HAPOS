@@ -48,7 +48,7 @@ function initTools() {
 
 function runStartupDiagnostics(health, env) {
   console.log("=".repeat(60));
-  console.log("HAPOS AI Startup Diagnostics");
+  console.log("AEGIS Startup Diagnostics");
   console.log("=".repeat(60));
   console.log(`AI Enabled:     ${env?.ai?.enabled ? "YES" : "NO"}`);
   console.log(`Provider:       ${env?.ai?.defaultProvider || "disabled"}`);
