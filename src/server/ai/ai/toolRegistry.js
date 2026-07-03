@@ -55,7 +55,7 @@ const {
  * @property {string} id          - Unique tool identifier.
  * @property {string} name        - Human-readable display name.
  * @property {string} description - One-sentence capability description.
- * @property {string} category    - Logical grouping (e.g. "students", "finance").
+ * @property {string} category    - Logical grouping (e.g. "Revenue", "Expenses").
  * @property {string} risk        - Risk level: "low" | "medium" | "high" | "critical".
  */
 

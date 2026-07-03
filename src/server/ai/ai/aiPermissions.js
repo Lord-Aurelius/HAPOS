@@ -79,7 +79,6 @@ function buildAiRequestContext(authContext = {}, payload = {}, endpoint = "chat"
     userId: authContext.userId,
     tenantId,
     role,
-    parentStudentIds: [],
     permissions,
     endpoint: normalizedEndpoint,
   };

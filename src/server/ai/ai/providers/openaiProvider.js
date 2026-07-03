@@ -2,62 +2,57 @@
 
 const https = require("https");
 const http = require("http");
-const { buildSystemMessage, buildDefaultMessages } = require("./providerUtils");
+const { toolSchemasForProvider } = require("../toolSchemas");
+const { buildSystemMessage } = require("./providerUtils");
 
-function createOllamaProvider(config) {
-  const baseUrl = String(config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
-  const model = String(config.ollamaModel || process.env.OLLAMA_MODEL || "llama3").replace(/\/+$/, "");
-  const keepAlive = String(config.ollamaKeepAlive || process.env.OLLAMA_KEEP_ALIVE || "5m");
+function createOpenAIProvider(config) {
+  const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY || "";
+  const model = config.openaiModel || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const baseUrl = (config.openaiBaseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
 
   return {
-    name: "ollama",
+    name: "openai",
     model,
     async invoke(request) {
       const endpoint = request.endpoint || "chat";
-      const ctx = request.context || {};
-      const payload = request.payload || {};
-
       const entityContext = request.entityContext || [];
       const tools = request.tools || [];
       const plannerMessage = request.plannerMessage || null;
-
-      const messages = request.messages || buildDefaultMessages(endpoint, payload);
+      const messages = request.messages || [];
 
       const systemMsg = buildSystemMessage(endpoint, entityContext, plannerMessage);
       const hasSystem = messages.length > 0 && messages[0].role === "system";
-      const finalMessages = hasSystem
-        ? [systemMsg, ...messages.slice(1)]
-        : [systemMsg, ...messages];
+      const finalMessages = hasSystem ? [systemMsg, ...messages.slice(1)] : [systemMsg, ...messages];
 
       const body = {
         model,
         messages: finalMessages,
         stream: false,
-        keep_alive: keepAlive,
       };
 
       if (tools.length > 0) {
         body.tools = tools;
+        body.tool_choice = "auto";
       }
 
-      if (payload.options) {
-        Object.assign(body, payload.options);
+      if (request.payload?.options) {
+        Object.assign(body, request.payload.options);
       }
 
-      const response = await ollamaFetch(baseUrl, "/api/chat", body);
+      const response = await apiFetch(baseUrl, "/chat/completions", body, apiKey);
 
       if (response.status >= 400) {
         return {
           status: "error",
-          content: `Ollama API error: ${response.data.error || response.status}`,
+          content: `OpenAI API error: ${response.data?.error?.message || response.status}`,
           toolCalls: null,
-          metadata: { endpoint, model, mode: "ollama", statusCode: response.status }
+          metadata: { endpoint, model, mode: "openai", statusCode: response.status },
         };
       }
 
-      const message = response.data.message || {};
+      const choice = response.data?.choices?.[0] || {};
+      const message = choice.message || {};
       const content = message.content || "";
-
       const rawToolCalls = message.tool_calls;
       const toolCalls = Array.isArray(rawToolCalls) && rawToolCalls.length > 0
         ? rawToolCalls.map((tc) => ({
@@ -68,28 +63,27 @@ function createOllamaProvider(config) {
               arguments: typeof tc.function?.arguments === "string"
                 ? tc.function.arguments
                 : JSON.stringify(tc.function?.arguments || {}),
-            }
+            },
           }))
         : null;
 
       const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
-
       return {
         status: hasToolCalls ? "tool_calls" : "ok",
         content,
         toolCalls,
         metadata: {
           endpoint,
-          model: response.data.model || model,
-          mode: "ollama",
-          done: Boolean(response.data.done)
-        }
+          model: response.data?.model || model,
+          mode: "openai",
+          usage: response.data?.usage || null,
+        },
       };
-    }
+    },
   };
 }
 
-function ollamaFetch(baseUrl, path, body) {
+function apiFetch(baseUrl, path, body, apiKey) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, baseUrl);
     const postData = JSON.stringify(body);
@@ -98,13 +92,14 @@ function ollamaFetch(baseUrl, path, body) {
     const options = {
       hostname: url.hostname,
       port: url.port || (isHttps ? 443 : 80),
-      path: url.pathname,
+      path: url.pathname + (url.search || ""),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(postData)
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Length": Buffer.byteLength(postData),
       },
-      timeout: 60000
+      timeout: 120000,
     };
     const req = transport.request(options, (res) => {
       const chunks = [];
@@ -119,10 +114,10 @@ function ollamaFetch(baseUrl, path, body) {
       });
     });
     req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Ollama request timed out")); });
+    req.on("timeout", () => { req.destroy(); reject(new Error("API request timed out")); });
     req.write(postData);
     req.end();
   });
 }
 
-module.exports = { createOllamaProvider };
+module.exports = { createOpenAIProvider };

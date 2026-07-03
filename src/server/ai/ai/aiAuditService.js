@@ -128,5 +128,6 @@ async function logToolExecution(entry = {}) {
 module.exports = {
   logAiRequest,
   logToolExecution,
-  metadataSummary
+  metadataSummary,
+  reportingContextSummary,
 };
