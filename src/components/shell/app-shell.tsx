@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 
+import { FloatingAssistant } from '@/components/ai/floating-assistant';
 import { HaposLogo } from '@/components/branding/hapos-logo';
 import { Sidebar } from '@/components/shell/sidebar';
 import type { AppSession } from '@/lib/types';
@@ -50,6 +51,7 @@ export function AppShell({ session, children }: AppShellProps) {
           {children}
         </div>
       </main>
+      <FloatingAssistant />
     </div>
   );
 }
