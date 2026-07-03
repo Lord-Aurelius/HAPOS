@@ -47,9 +47,17 @@ function mergeToolResults(toolResults) {
     opportunities: [],
     cashFlow: {},
     staff: [],
+    branches: [],
+    forecasts: {},
+    healthScore: null,
+    executiveSummary: null,
+    invoices: {},
+    revenueByEmployee: [],
+    revenueByService: [],
+    revenueByPaymentMethod: [],
+    revenueByBranch: [],
     suppliers: {},
     tax: {},
-    healthScore: null,
     reportingMetadata: null,
     missing: [],
     errors: [],
@@ -74,6 +82,34 @@ function mergeToolResults(toolResults) {
           if (data.period) evidence.period = data.period;
           break;
 
+        case "revenueByEmployee":
+          evidence.revenueByEmployee = extractArray(data, "employees");
+          break;
+
+        case "revenueByService":
+          evidence.revenueByService = extractArray(data, "services");
+          break;
+
+        case "revenueByPaymentMethod":
+          evidence.revenueByPaymentMethod = extractArray(data, "paymentMethods");
+          break;
+
+        case "revenueByBranch":
+          evidence.revenueByBranch = extractArray(data, "branches");
+          break;
+
+        case "serviceRevenueBreakdown":
+          evidence.serviceRevenueBreakdown = extractArray(data, "items");
+          break;
+
+        case "profitMarginBreakdown":
+          evidence.profitMarginBreakdown = extractArray(data, "items");
+          break;
+
+        case "branchPerformance":
+          evidence.branches = extractArray(data, "branches");
+          break;
+
         case "expenseAnalysis":
           evidence.expenses = { ...evidence.expenses, ...data };
           break;
@@ -87,13 +123,23 @@ function mergeToolResults(toolResults) {
           break;
 
         case "customerIntelligence":
-        case "topCustomers":
           evidence.customers = { ...evidence.customers, ...data };
           break;
 
+        case "topCustomers":
+          evidence.topCustomers = extractArray(data, "customers");
+          break;
+
+        case "customerActivity":
+          evidence.customerActivity = data;
+          break;
+
         case "serviceIntelligence":
-        case "serviceProfitability":
           evidence.services = extractArray(data, "services");
+          break;
+
+        case "serviceProfitability":
+          evidence.serviceProfitability = extractArray(data, "items");
           break;
 
         case "salesSummary":
@@ -102,6 +148,14 @@ function mergeToolResults(toolResults) {
 
         case "invoiceStatus":
           evidence.invoiceStatus = data;
+          break;
+
+        case "searchBusinessData":
+          evidence.searchResults = data;
+          break;
+
+        case "dashboardData":
+          evidence.dashboard = data;
           break;
 
         case "riskDetection":
@@ -129,9 +183,15 @@ function mergeToolResults(toolResults) {
           break;
 
         case "revenueForecast":
+          evidence.forecasts = { ...evidence.forecasts, revenue: data };
+          break;
+
         case "expenseForecast":
+          evidence.forecasts = { ...evidence.forecasts, expense: data };
+          break;
+
         case "demandForecast":
-          evidence.forecast = { ...(evidence.forecast || {}), ...data };
+          evidence.forecasts = { ...evidence.forecasts, demand: data };
           break;
 
         case "taxSummary":

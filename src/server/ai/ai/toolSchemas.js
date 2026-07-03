@@ -116,6 +116,36 @@ const TOOL_PARAM_SCHEMAS = {
     period: _param("string", "Time period for executive summary"),
   },
 
+  // New revenue breakdowns
+  revenueByEmployee: {
+    period: _param("string", "Time period for employee revenue breakdown"),
+  },
+  revenueByService: {
+    period: _param("string", "Time period for service revenue breakdown"),
+  },
+  revenueByPaymentMethod: {
+    period: _param("string", "Time period for payment method breakdown"),
+  },
+  revenueByBranch: {
+    period: _param("string", "Time period for branch revenue breakdown"),
+  },
+
+  // Branches
+  branchPerformance: {
+    period: _param("string", "Time period for branch performance analysis"),
+  },
+
+  // Search
+  searchBusinessData: {
+    query: _param("string", "Search query text"),
+    type: _param("string", "Entity type to search: all, customers, transactions, services, expenses"),
+  },
+
+  // Dashboard
+  dashboardData: {
+    period: _param("string", "Time period for dashboard data"),
+  },
+
   // Suppliers
   supplierInsights: {
     period: _param("string", "Time period for supplier analysis"),
