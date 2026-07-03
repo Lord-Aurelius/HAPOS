@@ -104,14 +104,14 @@ export function FloatingAssistant() {
             overflow: 'hidden',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface, #f8f9fa)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface, #f8f9fa)', color: '#111' }}>
             <strong>AEGIS</strong>
             <button type="button" onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: 4 }} aria-label="Close assistant">✕</button>
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {messages.length === 0 ? (
-              <p className="muted" style={{ textAlign: 'center', padding: 24, fontSize: '0.8rem' }}>
+              <p className="muted" style={{ textAlign: 'center', padding: 24, fontSize: '0.8rem', color: '#555' }}>
                 Ask about revenue, expenses, customers, services, or forecasts.
               </p>
             ) : (
@@ -125,12 +125,13 @@ export function FloatingAssistant() {
                   whiteSpace: 'pre-wrap',
                   fontSize: '0.8rem',
                   lineHeight: 1.5,
+                  color: '#111',
                 }}>
                   {m.content}
                 </div>
               ))
             )}
-            {loading ? <div style={{ alignSelf: 'flex-start', padding: '8px 12px', fontSize: '0.8rem' }}>Thinking...</div> : null}
+            {loading ? <div style={{ alignSelf: 'flex-start', padding: '8px 12px', fontSize: '0.8rem', color: '#555' }}>Thinking...</div> : null}
             <div ref={bottomRef} />
           </div>
 
