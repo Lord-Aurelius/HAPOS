@@ -293,7 +293,7 @@ function buildLoyaltyProgress(program: LoyaltyProgram | null | undefined, lifeti
   };
 }
 
-const DEFAULT_PUBLIC_APP_URL = 'https://hapos.vercel.app';
+const DEFAULT_PUBLIC_APP_URL = 'https://hapos-63oc.onrender.com';
 
 export function getPublicAppBaseUrl() {
   return DEFAULT_PUBLIC_APP_URL;

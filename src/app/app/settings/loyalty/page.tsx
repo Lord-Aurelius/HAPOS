@@ -73,7 +73,7 @@ export default async function LoyaltySettingsPage({ searchParams }: LoyaltySetti
           tenantName={tenant.name}
           bookingUrl={bookingUrl}
           heading="Shareable customer booking access"
-          copy="This booking link is now derived from the live app URL at hapos.vercel.app, and the admin can also download a QR code for the shop."
+          copy="This booking link is now derived from the live app URL at hapos-63oc.onrender.com, and the admin can also download a QR code for the shop."
         />
 
         <div className="panel">
