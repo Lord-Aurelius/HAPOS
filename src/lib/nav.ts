@@ -9,7 +9,7 @@ export type NavItem = {
 
 export const shopNav: NavItem[] = [
   { href: '/app/dashboard', label: 'Dashboard', roles: ['shop_admin', 'super_admin', 'staff'] },
-  { href: '/app/ai-dashboard', label: 'AI Analytics', roles: ['shop_admin', 'super_admin'] },
+  { href: '/app/ai-dashboard', label: 'AEGIS Analytics', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/service-entry', label: 'Service Entry', roles: ['shop_admin', 'super_admin', 'staff'] },
   { href: '/app/sales', label: 'Sales Ledger', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/customers', label: 'Customers', roles: ['shop_admin', 'super_admin', 'staff'] },
@@ -22,7 +22,6 @@ export const shopNav: NavItem[] = [
   { href: '/app/history', label: 'History & Export', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/sms', label: 'SMS Center', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/subscription', label: 'Subscription', roles: ['shop_admin', 'super_admin'] },
-  { href: '/app/settings/ai', label: 'AI Settings', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/settings/staff', label: 'Staff', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/settings/loyalty', label: 'Loyalty', roles: ['shop_admin', 'super_admin'] },
 ];

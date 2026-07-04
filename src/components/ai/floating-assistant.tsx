@@ -81,7 +81,7 @@ export function FloatingAssistant() {
         }}
         aria-label="Open AI assistant"
       >
-        AI
+        AEGIS
       </button>
 
       {isOpen ? (

@@ -18,7 +18,6 @@ import {
   History,
   MessageSquare,
   Crown,
-  Settings,
   UserCog,
   Heart,
   Building2,
@@ -53,7 +52,6 @@ const iconMap: Record<string, typeof LayoutDashboard> = {
   '/app/history': History,
   '/app/sms': MessageSquare,
   '/app/subscription': Crown,
-  '/app/settings/ai': Settings,
   '/app/settings/staff': UserCog,
   '/app/settings/loyalty': Heart,
   '/super/tenants': Building2,
@@ -65,7 +63,7 @@ const sections: Array<{ label: string; paths: string[] }> = [
   { label: 'Operations', paths: ['/app/service-entry', '/app/sales', '/app/customers', '/app/services', '/app/products'] },
   { label: 'Commerce', paths: ['/app/marketplace', '/app/commissions', '/app/expenses'] },
   { label: 'Reports', paths: ['/app/reports/monthly', '/app/history', '/app/sms'] },
-  { label: 'Admin', paths: ['/app/subscription', '/app/settings/ai', '/app/settings/staff', '/app/settings/loyalty'] },
+  { label: 'Admin', paths: ['/app/subscription', '/app/settings/staff', '/app/settings/loyalty'] },
 ];
 
 export function Sidebar({ user, tenant, subscription }: SidebarProps) {
