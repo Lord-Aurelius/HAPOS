@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 
 import { FloatingAssistant } from '@/components/ai/floating-assistant';
-import { HaposLogo } from '@/components/branding/hapos-logo';
 import { Sidebar } from '@/components/shell/sidebar';
 import type { AppSession } from '@/lib/types';
 import { logoutAction } from '@/server/actions/hapos';
@@ -28,20 +27,16 @@ export function AppShell({ session, children }: AppShellProps) {
         <div className="workspace-inner">
           <header className="workspace-topbar">
             <div className="workspace-topbar-main">
-              <Link href={homeHref} className="workspace-brand-link">
-                <HaposLogo compact />
-              </Link>
               <div className="workspace-title-block">
-                <p className="hero-kicker">{workspaceLabel}</p>
-                <div className="workspace-title">{workspaceName}</div>
-                <p className="workspace-subtitle">{workspaceMeta}</p>
+                <p className="workspace-kicker">{workspaceLabel}</p>
+                <h1 className="workspace-title">{workspaceName}</h1>
               </div>
             </div>
 
             <div className="workspace-topbar-actions">
-              {session.tenant ? <span className="pill">Business slug: {session.tenant.slug}</span> : <span className="pill">Platform access</span>}
+              <span className="workspace-meta">{workspaceMeta}</span>
               <form action={logoutAction}>
-                <button type="submit" className="button secondary">
+                <button type="submit" className="button ghost">
                   Log out
                 </button>
               </form>

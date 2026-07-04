@@ -1,4 +1,4 @@
-import { StatTile } from '@/components/ui/stat-tile';
+import { DollarSign, TrendingUp, Briefcase, CalendarDays, ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { requireSession } from '@/server/auth/demo-session';
 import { getDashboardSummary, getStaffMetrics } from '@/server/services/app-data';
@@ -12,15 +12,39 @@ function formatDelta(value: number) {
 }
 
 function getDeltaClass(value: number) {
-  if (value > 0) {
-    return 'trend-positive';
-  }
-
-  if (value < 0) {
-    return 'trend-negative';
-  }
-
+  if (value > 0) {return 'trend-positive';}
+  if (value < 0) {return 'trend-negative';}
   return 'trend-neutral';
+}
+
+function DeltaIcon({ value }: { value: number }) {
+  if (value > 0) {return <ArrowUpRight size={14} />;}
+  if (value < 0) {return <ArrowDownRight size={14} />;}
+  return <Minus size={14} />;
+}
+
+function KpiCard({ icon: Icon, label, value, trend }: {
+  icon: typeof DollarSign;
+  label: string;
+  value: string;
+  trend?: { value: number; label: string };
+}) {
+  return (
+    <div className="kpi-card">
+      <div className="kpi-card-header">
+        <span className="kpi-card-label">{label}</span>
+        <span className="kpi-card-icon"><Icon /></span>
+      </div>
+      <div className="kpi-card-value">{value}</div>
+      {trend ? (
+        <div className={`kpi-card-trend ${getDeltaClass(trend.value)}`}>
+          <DeltaIcon value={trend.value} />
+          <span>{formatDelta(trend.value)}</span>
+          <span>{trend.label}</span>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default async function DashboardPage() {
@@ -37,39 +61,45 @@ export default async function DashboardPage() {
   const revenueDelta = summary.monthRevenue - summary.previousMonthRevenue;
   const commissionDelta = summary.monthCommissionAccrued - summary.previousMonthCommissionAccrued;
 
+  const isStaff = session.user.role === 'staff';
+
   return (
     <>
       <section className="hero">
-        <p className="hero-kicker">Shop dashboard</p>
+        <p className="hero-kicker">
+          <TrendingUp size={14} />
+          {isStaff ? 'Staff dashboard' : 'Shop dashboard'}
+        </p>
         <h1 className="hero-title">{session.tenant.name}</h1>
         <p className="hero-subtitle">
-          {session.user.role === 'staff'
-            ? 'Your sales, commissions, and month-over-month contribution stay visible the moment you log in.'
-            : 'Track shop income, staff output, commissions, and month-over-month momentum from one tenant-safe workspace.'}
+          {isStaff
+            ? 'Your sales, commissions, and contribution at a glance.'
+            : 'Track shop income, staff output, commissions, and momentum.'}
         </p>
-        {session.user.role !== 'staff' && summary.highestEarner ? (
+        {!isStaff && summary.highestEarner ? (
           <div className="hero-actions">
             <span className="pill">
-              Top revenue earner this month: {summary.highestEarner.staffName} / {formatCurrency(summary.highestEarner.totalRevenue)}
+              <TrendingUp size={14} />
+              Top earner: {summary.highestEarner.staffName} / {formatCurrency(summary.highestEarner.totalRevenue)}
             </span>
           </div>
         ) : null}
       </section>
 
-      <section className="dashboard-grid">
-        {session.user.role === 'staff' && staffMetrics ? (
+      <section className="kpi-grid">
+        {isStaff && staffMetrics ? (
           <>
-            <StatTile label="Today sales" value={formatCurrency(staffMetrics.todaySales)} />
-            <StatTile label="This month sales" value={formatCurrency(staffMetrics.monthSales)} />
-            <StatTile label="This month commission" value={formatCurrency(staffMetrics.monthCommission)} tone="success" />
-            <StatTile label="Lifetime income" value={formatCurrency(summary.lifetimeRevenue)} />
+            <KpiCard icon={DollarSign} label="Today sales" value={formatCurrency(staffMetrics.todaySales)} />
+            <KpiCard icon={CalendarDays} label="This month" value={formatCurrency(staffMetrics.monthSales)} />
+            <KpiCard icon={Briefcase} label="Commission" value={formatCurrency(staffMetrics.monthCommission)} trend={{ value: commissionDelta, label: 'vs last month' }} />
+            <KpiCard icon={TrendingUp} label="Lifetime income" value={formatCurrency(summary.lifetimeRevenue)} />
           </>
         ) : (
           <>
-            <StatTile label="Today revenue" value={formatCurrency(summary.todayRevenue)} />
-            <StatTile label="This month revenue" value={formatCurrency(summary.monthRevenue)} />
-            <StatTile label="This month commission" value={formatCurrency(summary.monthCommissionAccrued)} />
-            <StatTile label="Total income earned" value={formatCurrency(summary.lifetimeRevenue)} tone="success" />
+            <KpiCard icon={DollarSign} label="Today revenue" value={formatCurrency(summary.todayRevenue)} />
+            <KpiCard icon={CalendarDays} label="This month" value={formatCurrency(summary.monthRevenue)} trend={{ value: revenueDelta, label: 'vs last month' }} />
+            <KpiCard icon={Briefcase} label="Commission" value={formatCurrency(summary.monthCommissionAccrued)} trend={{ value: commissionDelta, label: 'vs last month' }} />
+            <KpiCard icon={TrendingUp} label="Total income" value={formatCurrency(summary.lifetimeRevenue)} />
           </>
         )}
       </section>
@@ -80,7 +110,7 @@ export default async function DashboardPage() {
             <div>
               <h2>Month comparison</h2>
               <p className="panel-copy">
-                Compare the current month with the previous one across money generated and commission earned.
+                Compare the current month with the previous one.
               </p>
             </div>
           </div>
@@ -98,25 +128,25 @@ export default async function DashboardPage() {
             </article>
           </div>
 
-          <div className="stack" style={{ marginTop: 20 }}>
+          <div className="stack" style={{ marginTop: 16 }}>
             <div className="list-row">
               <div>
                 <strong>Revenue change</strong>
-                <div className="eyebrow">Current month versus previous month</div>
+                <div className="eyebrow">Current vs previous month</div>
               </div>
               <strong className={getDeltaClass(revenueDelta)}>{formatDelta(revenueDelta)}</strong>
             </div>
             <div className="list-row">
               <div>
                 <strong>Commission change</strong>
-                <div className="eyebrow">Earned commission movement across the last two months</div>
+                <div className="eyebrow">Movement across two months</div>
               </div>
               <strong className={getDeltaClass(commissionDelta)}>{formatDelta(commissionDelta)}</strong>
             </div>
             <div className="list-row">
               <div>
-                <strong>{session.user.role === 'staff' ? 'Lifetime commission' : 'All-time commission accrued'}</strong>
-                <div className="eyebrow">Running total based on recorded service history</div>
+                <strong>{isStaff ? 'Lifetime commission' : 'All-time commission'}</strong>
+                <div className="eyebrow">Running total from recorded services</div>
               </div>
               <strong>{formatCurrency(summary.lifetimeCommission)}</strong>
             </div>
@@ -126,42 +156,42 @@ export default async function DashboardPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>{session.user.role === 'staff' ? 'Your month at a glance' : 'Top earner insight'}</h2>
+              <h2>{isStaff ? 'Your month' : 'Top earner insight'}</h2>
               <p className="panel-copy">
-                {session.user.role === 'staff'
-                  ? 'Staff users only see their own numbers, clients, and earnings trajectory.'
-                  : 'Quick read on who is leading the floor and how the shop is carrying margin this month.'}
+                {isStaff
+                  ? 'Your numbers, clients, and earnings.'
+                  : 'Who is leading the floor this month.'}
               </p>
             </div>
           </div>
 
-          {session.user.role === 'staff' && staffMetrics ? (
+          {isStaff && staffMetrics ? (
             <div className="stack">
               <div className="list-row">
                 <div>
                   <strong>Clients this month</strong>
-                  <div className="eyebrow">Unique customers handled by you</div>
+                  <div className="eyebrow">Unique customers handled</div>
                 </div>
                 <strong>{staffMetrics.monthClients}</strong>
               </div>
               <div className="list-row">
                 <div>
                   <strong>Clients today</strong>
-                  <div className="eyebrow">Customers served in your current shift</div>
+                  <div className="eyebrow">Served in current shift</div>
                 </div>
                 <strong>{staffMetrics.todayClients}</strong>
               </div>
               <div className="list-row">
                 <div>
-                  <strong>This month commission</strong>
-                  <div className="eyebrow">What you have earned so far this month</div>
+                  <strong>Month commission</strong>
+                  <div className="eyebrow">Earned so far this month</div>
                 </div>
-                <strong style={{ color: 'var(--success)' }}>{formatCurrency(staffMetrics.monthCommission)}</strong>
+                <strong className="trend-positive">{formatCurrency(staffMetrics.monthCommission)}</strong>
               </div>
               <div className="list-row">
                 <div>
                   <strong>Lifetime income</strong>
-                  <div className="eyebrow">Total value of your recorded services</div>
+                  <div className="eyebrow">Total value of recorded services</div>
                 </div>
                 <strong>{formatCurrency(summary.lifetimeRevenue)}</strong>
               </div>
@@ -171,28 +201,28 @@ export default async function DashboardPage() {
               <div className="list-row">
                 <div>
                   <strong>{summary.highestEarner?.staffName ?? 'No staff data yet'}</strong>
-                  <div className="eyebrow">Highest revenue contributor this month</div>
+                  <div className="eyebrow">Top revenue contributor</div>
                 </div>
                 <strong>{formatCurrency(summary.highestEarner?.totalRevenue ?? 0)}</strong>
               </div>
               <div className="list-row">
                 <div>
-                  <strong>Commission for top earner</strong>
-                  <div className="eyebrow">Commission attached to the current revenue leader</div>
+                  <strong>Top earner commission</strong>
+                  <div className="eyebrow">Attached commission</div>
                 </div>
                 <strong>{formatCurrency(summary.highestEarner?.totalCommission ?? 0)}</strong>
               </div>
               <div className="list-row">
                 <div>
-                  <strong>Month net profit</strong>
-                  <div className="eyebrow">Income after expenses, product costs, and paid commissions</div>
+                  <strong>Net profit</strong>
+                  <div className="eyebrow">After expenses, costs, commissions</div>
                 </div>
-                <strong style={{ color: 'var(--success)' }}>{formatCurrency(summary.monthNetProfit)}</strong>
+                <strong className="trend-positive">{formatCurrency(summary.monthNetProfit)}</strong>
               </div>
               <div className="list-row">
                 <div>
                   <strong>Total income earned</strong>
-                  <div className="eyebrow">All recorded service income for this shop</div>
+                  <div className="eyebrow">All recorded service income</div>
                 </div>
                 <strong>{formatCurrency(summary.lifetimeRevenue)}</strong>
               </div>
@@ -204,14 +234,14 @@ export default async function DashboardPage() {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Contribution by month</h2>
+            <h2>Monthly trend</h2>
             <p className="panel-copy">
-              Revenue and commission history across the latest six months for {session.user.role === 'staff' ? 'your work' : 'the whole shop'}.
+              Revenue and commission history across the latest six months for {isStaff ? 'your work' : 'the shop'}.
             </p>
           </div>
         </div>
 
-        <table className="table trend-table">
+        <table className="table">
           <thead>
             <tr>
               <th>Month</th>
@@ -224,9 +254,7 @@ export default async function DashboardPage() {
           <tbody>
             {summary.monthlyTrend.map((row) => (
               <tr key={row.monthKey}>
-                <td>
-                  <strong>{row.monthLabel}</strong>
-                </td>
+                <td><strong>{row.monthLabel}</strong></td>
                 <td>{formatCurrency(row.revenue)}</td>
                 <td>{formatCurrency(row.commission)}</td>
                 <td>{row.services}</td>
@@ -241,11 +269,11 @@ export default async function DashboardPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>{session.user.role === 'staff' ? 'Your client reach' : 'Staff ranking this month'}</h2>
+              <h2>{isStaff ? 'Your reach' : 'Staff ranking'}</h2>
               <p className="panel-copy">
-                {session.user.role === 'staff'
-                  ? 'Client count and service volume help you understand your own output and earnings.'
-                  : 'Revenue and commission stay visible per staff member for clean payroll and coaching conversations.'}
+                {isStaff
+                  ? 'Client count and service volume.'
+                  : 'Revenue per staff member.'}
               </p>
             </div>
           </div>
@@ -256,10 +284,10 @@ export default async function DashboardPage() {
                 <div>
                   <strong>{member.staffName}</strong>
                   <div className="eyebrow">
-                    {member.totalServices} services completed / {member.clientCount} clients
+                    {member.totalServices} services / {member.clientCount} clients
                   </div>
                 </div>
-                <div>
+                <div style={{ textAlign: 'right' }}>
                   <strong>{formatCurrency(member.totalRevenue)}</strong>
                   <div className="eyebrow">{formatCurrency(member.totalCommission)} commission</div>
                 </div>
@@ -271,11 +299,11 @@ export default async function DashboardPage() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>{session.user.role === 'staff' ? 'Your month at a glance' : 'Financial posture'}</h2>
+              <h2>{isStaff ? 'At a glance' : 'Financial posture'}</h2>
               <p className="panel-copy">
-                {session.user.role === 'staff'
-                  ? 'Staff users only see their own money and client activity.'
-                  : 'Net profit is derived from service income minus expenses, product costs, and commission payouts.'}
+                {isStaff
+                  ? 'Your money and client activity.'
+                  : 'Net profit after all outflows.'}
               </p>
             </div>
           </div>
@@ -283,27 +311,27 @@ export default async function DashboardPage() {
           <div className="stack">
             <div className="list-row">
               <div>
-                <strong>{session.user.role === 'staff' ? 'Clients this month' : 'Expenses this month'}</strong>
-                <div className="eyebrow">{session.user.role === 'staff' ? 'Unique customers handled by you' : 'Operating outflow'}</div>
+                <strong>{isStaff ? 'Clients this month' : 'Expenses this month'}</strong>
+                <div className="eyebrow">{isStaff ? 'Unique customers handled' : 'Operating outflow'}</div>
               </div>
-              <strong>{session.user.role === 'staff' && staffMetrics ? staffMetrics.monthClients : formatCurrency(summary.monthExpenses)}</strong>
+              <strong>{isStaff && staffMetrics ? staffMetrics.monthClients : formatCurrency(summary.monthExpenses)}</strong>
             </div>
             <div className="list-row">
               <div>
-                <strong>{session.user.role === 'staff' ? 'Clients today' : 'Product costs'}</strong>
-                <div className="eyebrow">{session.user.role === 'staff' ? "Today's served customers" : 'Usage recorded through service entries'}</div>
+                <strong>{isStaff ? 'Clients today' : 'Product costs'}</strong>
+                <div className="eyebrow">{isStaff ? "Today's customers" : 'Service entry usage'}</div>
               </div>
               <strong>
-                {session.user.role === 'staff' && staffMetrics ? staffMetrics.todayClients : formatCurrency(summary.monthProductCosts)}
+                {isStaff && staffMetrics ? staffMetrics.todayClients : formatCurrency(summary.monthProductCosts)}
               </strong>
             </div>
             <div className="list-row">
               <div>
-                <strong>{session.user.role === 'staff' ? 'Month earnings' : 'Net profit'}</strong>
-                <div className="eyebrow">{session.user.role === 'staff' ? 'Commission accrued from your work' : 'After payouts, product costs, and expenses'}</div>
+                <strong>{isStaff ? 'Month earnings' : 'Net profit'}</strong>
+                <div className="eyebrow">{isStaff ? 'Commission accrued' : 'After all outflows'}</div>
               </div>
-              <strong style={{ color: 'var(--success)' }}>
-                {session.user.role === 'staff' && staffMetrics
+              <strong className="trend-positive">
+                {isStaff && staffMetrics
                   ? formatCurrency(staffMetrics.monthCommission)
                   : formatCurrency(summary.monthNetProfit)}
               </strong>
@@ -316,7 +344,7 @@ export default async function DashboardPage() {
         <div className="panel-header">
           <div>
             <h2>Recent services</h2>
-            <p className="panel-copy">Live feed of the tenant&apos;s latest completed services.</p>
+            <p className="panel-copy">Latest completed services.</p>
           </div>
         </div>
 
