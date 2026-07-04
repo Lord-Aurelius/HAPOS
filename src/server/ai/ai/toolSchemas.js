@@ -11,7 +11,7 @@ const TOOL_PARAM_SCHEMAS = {
   revenueSummary: {
     period: _param("string", "Time period: today, yesterday, this_week, this_month, this_year, or a custom date range (start..end)"),
     branchId: _param("string", "Optional branch identifier to filter by"),
-    groupBy: _param("string", "Group results by: day, week, month, year"),
+    groupBy: _param("string", "Group results by: service, employee, branch, customer, payment_method, day, week, month, quarter, year"),
   },
   revenueTrends: {
     period: _param("string", "Time period: this_month, last_month, this_year, or a date range"),
@@ -21,7 +21,7 @@ const TOOL_PARAM_SCHEMAS = {
   serviceRevenueBreakdown: {
     period: _param("string", "Time period for the breakdown"),
     branchId: _param("string", "Optional branch identifier"),
-    groupBy: _param("string", "Group by: service, staff, branch"),
+    groupBy: _param("string", "Group by: service, employee, branch, customer, payment_method, day, week, month, quarter, year"),
   },
 
   // Expenses
@@ -42,7 +42,7 @@ const TOOL_PARAM_SCHEMAS = {
   },
   profitMarginBreakdown: {
     period: _param("string", "Time period for margin breakdown"),
-    groupBy: _param("string", "Group by: service, branch, staff"),
+    groupBy: _param("string", "Group by: service, employee, branch, customer, payment_method, day, week, month, quarter, year"),
   },
 
   // Customers

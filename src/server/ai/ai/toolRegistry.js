@@ -103,6 +103,41 @@ const _registry = AI_TOOL_CATALOG.reduce((acc, tool) => {
 }, /** @type {Record<string, ToolImplementation|null>} */ ({}));
 
 /**
+ * Alias map — common alternative tool names that AI models may call.
+ * When an unrecognised toolId is requested, the registry resolves it
+ * to the canonical ID before looking up or authorising.
+ *
+ * Add entries here for any variant the AI is observed to call that
+ * does not match the catalog ID.  This avoids changing the catalog
+ * (which would affect schemas, permissions, and tool documentation).
+ */
+const TOOL_ALIASES = Object.freeze({
+  "serviceAnalysis": "serviceIntelligence",
+  "employeePerformance": "staffPerformance",
+  "revenueAnalytics": "revenueSummary",
+  "salesAnalytics": "salesSummary",
+  "customerAnalytics": "customerIntelligence",
+  "expenseAnalytics": "expenseAnalysis",
+  "branchAnalytics": "branchPerformance",
+  "profitAnalytics": "profitAnalysis",
+  "cashAnalytics": "cashFlowAnalysis",
+  "forecastAnalytics": "revenueForecast",
+  "riskAnalytics": "riskDetection",
+  "opportunityAnalytics": "opportunityDetection",
+  "serviceProfit": "serviceProfitability",
+  "staffAnalytics": "staffPerformance",
+  "employeeAnalytics": "staffPerformance",
+  "businessHealth": "businessHealthScore",
+  "executiveOverview": "executiveSummary",
+  "dashboardOverview": "dashboardData",
+  "topEmployee": "staffPerformance",
+  "topBranch": "branchPerformance",
+  "topService": "serviceIntelligence",
+  "topCustomer": "topCustomers",
+  "branchComparison": "branchPerformance",
+});
+
+/**
  * Public frozen snapshot of the registry's key set.
  * Exposes which tool IDs the registry recognises without surfacing the mutable
  * internal store.  Values are always `null` in this snapshot; use {@link getTool}
@@ -136,19 +171,21 @@ const TOOL_REGISTRY = Object.freeze(
  * await tool.run({ context, args });
  */
 function getTool(toolId) {
-  if (!Object.prototype.hasOwnProperty.call(_registry, toolId)) {
+  const canonicalId = TOOL_ALIASES[toolId] || toolId;
+
+  if (!Object.prototype.hasOwnProperty.call(_registry, canonicalId)) {
     throw new Error(
       `Tool "${toolId}" is not a recognised tool ID. ` +
         `Verify the ID against AI_TOOL_CATALOG in aiTools.js.`
     );
   }
 
-  const implementation = _registry[toolId];
+  const implementation = _registry[canonicalId];
 
   if (implementation === null) {
     throw new Error(
       `Tool "${toolId}" has not been implemented yet. ` +
-        `Register a BaseTool instance via registerTool("${toolId}", new MyTool()).`
+        `Register a BaseTool instance via registerTool("${canonicalId}", new MyTool()).`
     );
   }
 
@@ -277,14 +314,16 @@ function _assertRoleMatchesContext(role, contextRole, callerName) {
  * validateToolAccess("staff", "executiveSummary"); // throws
  */
 function validateToolAccess(role, toolId) {
-  if (!Object.prototype.hasOwnProperty.call(_registry, toolId)) {
+  const canonicalId = TOOL_ALIASES[toolId] || toolId;
+
+  if (!Object.prototype.hasOwnProperty.call(_registry, canonicalId)) {
     throw new Error(
       `Access denied: "${toolId}" is not a recognised tool ID. ` +
         `Verify the ID against AI_TOOL_CATALOG in aiTools.js.`
     );
   }
 
-  if (!isToolAllowed(role, toolId)) {
+  if (!isToolAllowed(role, canonicalId)) {
     throw new Error(
       `Access denied: role "${role}" is not authorised to invoke tool "${toolId}".`
     );
