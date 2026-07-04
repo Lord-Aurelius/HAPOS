@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/server/auth/demo-session';
 
-const { initTools } = require('@/server/ai/ai/initTools');
 const { registryHealth } = require('@/server/ai/ai/toolRegistry');
 const { resolveProvider, listConfiguredProviders } = require('@/server/ai/ai/providerRegistry');
 const env = require('@/server/config/env');
@@ -15,7 +14,7 @@ export async function GET() {
     let providerName = 'disabled';
 
     try {
-      const health = initTools ? registryHealth() : null;
+      const health = registryHealth();
       toolHealth = health ? { registered: health.registered, total: health.totalCatalogued, missing: health.missingTools } : null;
 
       const providers = listConfiguredProviders ? listConfiguredProviders() : [];

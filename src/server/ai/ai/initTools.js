@@ -101,4 +101,11 @@ function runStartupDiagnostics(health, env) {
   console.log("=".repeat(60));
 }
 
-module.exports = { initTools, runStartupDiagnostics };
+// Auto-initialise tools on module load (tool registration does not depend on env vars)
+const initHealth = initTools();
+
+// NOTE: runStartupDiagnostics is NOT called here because requiring env.js at module level
+// would freeze process.env at build time, preventing Render's runtime env vars from being used.
+// It is called lazily by the health endpoint instead.
+
+module.exports = { initTools, runStartupDiagnostics, initHealth };
