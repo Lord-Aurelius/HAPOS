@@ -84,69 +84,71 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
 
           <form action={recordServiceAction} className="field-grid">
             <input type="hidden" name="tenantTimeZone" value={tenant.timezone} />
-            <div className="field">
-              <label htmlFor="customerName">Customer name</label>
-              <input id="customerName" name="customerName" placeholder="Kevin Mwangi" required />
-            </div>
-            <div className="field">
-              <label htmlFor="customerPhone">Customer phone in +254 format</label>
-              <input id="customerPhone" name="customerPhone" placeholder="+254711000101" required />
-            </div>
-            {session.user.role !== 'staff' ? (
+            <div className="field-row">
               <div className="field">
-                <label htmlFor="staffId">Staff member</label>
-                <select id="staffId" name="staffId" defaultValue={session.user.id}>
-                  {staff.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.fullName}
-                    </option>
-                  ))}
+                <label htmlFor="customerName">Customer name</label>
+                <input id="customerName" name="customerName" placeholder="Kevin Mwangi" required />
+              </div>
+              <div className="field">
+                <label htmlFor="customerPhone">Phone (+254)</label>
+                <input id="customerPhone" name="customerPhone" placeholder="+254711000101" required />
+              </div>
+            </div>
+            <div className="field-row">
+              {session.user.role !== 'staff' ? (
+                <div className="field">
+                  <label htmlFor="staffId">Staff member</label>
+                  <select id="staffId" name="staffId" defaultValue={session.user.id}>
+                    {staff.map((member) => (
+                      <option key={member.id} value={member.id}>{member.fullName}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div className="field">
+                <label htmlFor="serviceMode">Service source</label>
+                <select id="serviceMode" name="serviceMode" defaultValue={hasServices ? 'price-list' : 'custom'}>
+                  <option value="price-list">Use price list</option>
+                  <option value="custom">Custom service</option>
                 </select>
               </div>
-            ) : null}
-            <div className="field">
-              <label htmlFor="serviceMode">Service source</label>
-              <select id="serviceMode" name="serviceMode" defaultValue={hasServices ? 'price-list' : 'custom'}>
-                <option value="price-list">Use price list</option>
-                <option value="custom">Custom service</option>
-              </select>
             </div>
-            <div className="field">
-              <label htmlFor="serviceId">Price list service</label>
-              <select id="serviceId" name="serviceId" defaultValue={services[0]?.id ?? ''}>
-                {services.length > 0 ? (
-                  services.map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name} / {formatCurrency(service.price)}
-                  </option>
-                  ))
-                ) : (
-                  <option value="">No services configured</option>
-                )}
-              </select>
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor="serviceId">Price list service</label>
+                <select id="serviceId" name="serviceId" defaultValue={services[0]?.id ?? ''}>
+                  {services.length > 0 ? (
+                    services.map((service) => (
+                    <option key={service.id} value={service.id}>{service.name} / {formatCurrency(service.price)}</option>
+                    ))
+                  ) : (
+                    <option value="">No services configured</option>
+                  )}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="customServiceName">Custom service name</label>
+                <input id="customServiceName" name="customServiceName" placeholder="Home Service Beard Trim" />
+              </div>
             </div>
-            <div className="field">
-              <label htmlFor="customServiceName">Custom service name</label>
-              <input id="customServiceName" name="customServiceName" placeholder="Home Service Beard Trim" />
-            </div>
-            <div className="field">
-              <label htmlFor="customPrice">Custom price</label>
-              <input id="customPrice" name="customPrice" type="number" min="0" step="1" placeholder="1000" />
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor="customPrice">Custom price</label>
+                <input id="customPrice" name="customPrice" type="number" min="0" step="1" placeholder="1000" />
+              </div>
+              <div className="field">
+                <label htmlFor="productQuantity">Product qty</label>
+                <input id="productQuantity" name="productQuantity" type="number" min="0" step="1" defaultValue="1" />
+              </div>
             </div>
             <div className="field">
               <label htmlFor="productId">Used product</label>
               <select id="productId" name="productId" defaultValue="">
                 <option value="">No product recorded</option>
                 {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} / {formatCurrency(product.unitCost)}
-                  </option>
+                  <option key={product.id} value={product.id}>{product.name} / {formatCurrency(product.unitCost)}</option>
                 ))}
               </select>
-            </div>
-            <div className="field">
-              <label htmlFor="productQuantity">Product quantity</label>
-              <input id="productQuantity" name="productQuantity" type="number" min="0" step="1" defaultValue="1" />
             </div>
             <div className="field">
               <label htmlFor="description">Service notes</label>
@@ -154,15 +156,8 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
             </div>
             <div className="field">
               <label htmlFor="performedAt">Service date and time</label>
-              <input
-                id="performedAt"
-                name="performedAt"
-                type="datetime-local"
-                defaultValue={toDateTimeInputValue(new Date().toISOString(), tenant.timezone)}
-              />
-              <div className="field-hint">
-                Use the actual time the sale happened. You can backfill yesterday's work or older sales here.
-              </div>
+              <input id="performedAt" name="performedAt" type="datetime-local" defaultValue={toDateTimeInputValue(new Date().toISOString(), tenant.timezone)} />
+              <div className="field-hint">Use the actual time the sale happened. You can backfill yesterday's work or older sales here.</div>
             </div>
             <div className="hero-actions">
               <FormSubmitButton type="submit" className="button" pendingLabel="Saving service...">
