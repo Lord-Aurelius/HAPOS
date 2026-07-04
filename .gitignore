@@ -12,6 +12,7 @@ coverage
 dist
 dist-local
 *.log
+*.tmp
 tsconfig.tsbuildinfo
 .env
 .env.local
@@ -26,10 +27,16 @@ public/uploads/services/*
 public/uploads/marketplace/*
 !public/uploads/marketplace/.gitkeep
 .vscode
+.idea
+.fork-test.js
+.hintrc
+.tmp-cookie.txt
 android/.gradle
 android/local.properties
 android/build
 android/app/build
 android/.idea
+android/capacitor-cordova-android-plugins/build
+**/MainActivity.java.txt
 
 /generated/prisma
