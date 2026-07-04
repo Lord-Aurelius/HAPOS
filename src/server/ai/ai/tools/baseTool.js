@@ -50,13 +50,13 @@ class BaseTool {
    *
    * @param {Object} params               - Tool descriptor.
    * @param {string} params.id            - Unique tool identifier matching the
-   *   corresponding entry in AI_TOOL_CATALOG (e.g. `"studentLookup"`).
-   * @param {string} params.name          - Human-readable display name
-   *   (e.g. `"Student Lookup"`).
+ *   corresponding entry in AI_TOOL_CATALOG (e.g. `"revenueSummary"`).
+ * @param {string} params.name          - Human-readable display name
+ *   (e.g. `"Revenue Summary"`).
    * @param {string} params.description   - One-sentence description of what the
    *   tool does; surfaced to the AI provider as capability documentation.
    * @param {string} [params.category="general"] - Logical grouping used for
-   *   discovery and UI organisation (e.g. `"students"`, `"finance"`).
+   *   discovery and UI organisation (e.g. `"Revenue"`, `"Customers"`).
    * @param {string} [params.risk="low"]  - Risk classification for this tool.
    *   Must be one of: `"low"`, `"medium"`, `"high"`, `"critical"`.
    *   High-risk and critical tools require human confirmation before execution;
@@ -221,14 +221,14 @@ class BaseTool {
    * @param {Object} args - Caller-supplied arguments for the tool invocation.
    * @returns {true} Returns `true` on success (allows override to be concise).
    *
-   * @example
-   * // Overriding in a subclass:
-   * validateArgs(args) {
-   *   if (!args.studentId || typeof args.studentId !== "string") {
-   *     throw new TypeError(`Tool "${this.id}": "args.studentId" is required.`);
-   *   }
-   *   return true;
-   * }
+ * @example
+ * // Overriding in a subclass:
+ * validateArgs(args) {
+ *   if (!args.period || typeof args.period !== "string") {
+ *     throw new TypeError(`Tool "${this.id}": "args.period" is required.`);
+ *   }
+ *   return true;
+ * }
    */
   // eslint-disable-next-line no-unused-vars
   validateArgs(args) {
@@ -315,11 +315,11 @@ class BaseTool {
    *
    * @returns {{ id: string, name: string, description: string, category: string, risk: string }}
    *
-   * @example
-   * const tool = new StudentLookupTool();
-   * tool.metadata();
-   * // → { id: "studentLookup", name: "Student Lookup", description: "...",
-   * //     category: "students", risk: "low" }
+ * @example
+ * const tool = new RevenueSummaryTool();
+ * tool.metadata();
+ * // → { id: "revenueSummary", name: "Revenue Summary", description: "...",
+ * //     category: "Revenue", risk: "low" }
    */
   metadata() {
     return {

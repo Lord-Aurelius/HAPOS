@@ -132,7 +132,7 @@ const TOOL_REGISTRY = Object.freeze(
  *   (its registry entry is still `null`).
  *
  * @example
- * const tool = getTool("studentLookup");
+ * const tool = getTool("revenueSummary");
  * await tool.run({ context, args });
  */
 function getTool(toolId) {
@@ -171,7 +171,7 @@ function getTool(toolId) {
  *
  * @example
  * const tools = getTools(toolsForRole("finance"));
- * // → { studentLookup: StudentLookupTool, feeBalanceLookup: FeeBalanceLookupTool, ... }
+ * // → { revenueSummary: RevenueSummaryTool, profitAnalysis: ProfitAnalysisTool, ... }
  */
 function getTools(toolIds = []) {
   if (!Array.isArray(toolIds)) {
@@ -273,8 +273,8 @@ function _assertRoleMatchesContext(role, contextRole, callerName) {
  * @throws {Error} If the role is not authorised to invoke the tool.
  *
  * @example
- * validateToolAccess("parent", "childProfile");     // passes silently
- * validateToolAccess("parent", "paymentRecording"); // throws
+ * validateToolAccess("shop_admin", "revenueSummary");     // passes silently
+ * validateToolAccess("staff", "executiveSummary"); // throws
  */
 function validateToolAccess(role, toolId) {
   if (!Object.prototype.hasOwnProperty.call(_registry, toolId)) {
@@ -351,8 +351,8 @@ function validateToolAccess(role, toolId) {
  * const plan = prepareToolExecution({
  *   role: "finance",
  *   toolId: "paymentRecording",
- *   context: { tenantId: "school-42", userId: "usr-7", role: "finance" },
- *   args: { studentId: "std-9", amount: 5000, method: "mpesa" },
+ *   context: { tenantId: "tenant-royal-fades", userId: "usr-7", role: "shop_admin" },
+ *   args: { period: "this_month" },
  * });
  * // → { toolId: "paymentRecording", allowed: true, requiresConfirmation: true, context: {...}, args: {...} }
  */
@@ -476,8 +476,8 @@ function prepareToolExecution({ role, toolId, context, args = {} }) {
  * const result = await executeTool({
  *   role: "finance",
  *   toolId: "feeBalanceLookup",
- *   context: { tenantId: "school-42", userId: "usr-7", role: "finance" },
- *   args: { studentId: "std-9" },
+ *   context: { tenantId: "tenant-royal-fades", userId: "usr-7", role: "shop_admin" },
+ *   args: { period: "this_month" },
  * });
  */
 async function executeTool({ role, toolId, context, args = {} }) {
@@ -549,8 +549,8 @@ async function executeTool({ role, toolId, context, args = {} }) {
  * @throws {TypeError} If `implementation.metadata` is not a function.
  *
  * @example
- * const { StudentLookupTool } = require("./tools/students/studentLookupTool");
- * registerTool("studentLookup", new StudentLookupTool({ studentService }));
+ * const { RevenueSummaryTool } = require("./tools/revenueSummaryTool");
+ * registerTool("revenueSummary", new RevenueSummaryTool({ repo: biRepo }));
  */
 function registerTool(toolId, implementation) {
   // --- Catalog check ---------------------------------------------------------
@@ -636,8 +636,8 @@ function registerTool(toolId, implementation) {
  * @throws {Error} If the tool has no registered implementation (already `null`).
  *
  * @example
- * deregisterTool("studentLookup");
- * // _registry["studentLookup"] is now null; re-registration is permitted.
+ * deregisterTool("revenueSummary");
+ * // _registry["revenueSummary"] is now null; re-registration is permitted.
  */
 function deregisterTool(toolId) {
   if (!Object.prototype.hasOwnProperty.call(_registry, toolId)) {
@@ -669,7 +669,7 @@ function deregisterTool(toolId) {
  *
  * @example
  * registeredTools();
- * // → ["attendanceLookup", "studentLookup"]
+ * // → ["revenueSummary", "profitAnalysis"]
  */
 function registeredTools() {
   return Object.keys(_registry)
@@ -713,9 +713,9 @@ function unregisteredTools() {
  * @throws {Error} If the tool has not been registered yet (still `null`).
  *
  * @example
- * getToolMetadata("studentLookup");
- * // → { id: "studentLookup", name: "Student Lookup", description: "...",
- * //     category: "students", risk: "low" }
+ * getToolMetadata("revenueSummary");
+ * // → { id: "revenueSummary", name: "Revenue Summary", description: "...",
+ * //     category: "Revenue", risk: "low" }
  */
 function getToolMetadata(toolId) {
   const tool = getTool(toolId); // throws if unknown or unregistered
@@ -736,7 +736,7 @@ function getToolMetadata(toolId) {
  * allToolMetadata();
  * // → [
  * //   { id: "attendanceLookup", name: "Attendance Lookup", ..., risk: "low" },
- * //   { id: "studentLookup",    name: "Student Lookup",    ..., risk: "low" },
+ * //   { id: "revenueSummary",   name: "Revenue Summary",   ..., risk: "low" },
  * // ]
  */
 function allToolMetadata() {
@@ -766,8 +766,8 @@ function allToolMetadata() {
  * //   totalCatalogued:  12,
  * //   registered:        2,
  * //   unregistered:     10,
- * //   implementedTools: ["attendanceLookup", "studentLookup"],
- * //   missingTools:     ["admissionsAnalysis", "excelImport", ...]
+ * //   implementedTools: ["revenueSummary", "profitAnalysis"],
+ * //   missingTools:     ["supplierInsights", "taxSummary", ...]
  * // }
  */
 function registryHealth() {

@@ -4,15 +4,19 @@ import { getCurrentSession } from '@/server/auth/demo-session';
 const { getToolHealth, getToolSchemas, executeToolCall } = require('@/server/ai/ai/aiToolRouter');
 
 export async function GET() {
-  const session = await getCurrentSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  try {
+    const session = await getCurrentSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const health = getToolHealth ? getToolHealth() : null;
+    const schemas = getToolSchemas ? getToolSchemas() : [];
+
+    return NextResponse.json({ health, schemas });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Failed to get tool info' }, { status: 500 });
   }
-
-  const health = getToolHealth ? getToolHealth() : null;
-  const schemas = getToolSchemas ? getToolSchemas() : [];
-
-  return NextResponse.json({ health, schemas });
 }
 
 export async function POST(request: NextRequest) {

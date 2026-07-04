@@ -2,8 +2,8 @@
 
 const { queryRows, queryOne } = require("../../../db/query");
 
-function authCtx(tenantId) {
-  return { tenantId, userId: "ai-tool", role: "shop_admin" };
+function authCtx(tenantId, userId, role) {
+  return { tenantId, userId: userId || "ai-tool", role: role || "shop_admin" };
 }
 
 function safeNum(v) {
@@ -96,9 +96,6 @@ async function getRevenueSummary({ tenantId, period, groupBy }) {
 
   const pf = buildPeriodFilter(sql, params, period);
   sql = pf.sql;
-  params.length = 0;
-  params.push(tenantId);
-  buildPeriodFilter(sql, params, period);
 
   const stats = await queryOne(ctx, sql, params) || {};
 
@@ -109,17 +106,19 @@ async function getRevenueSummary({ tenantId, period, groupBy }) {
       : groupBy === "week"
         ? "DATE_TRUNC('week', (state->>'performedAt')::timestamp)"
         : "DATE_TRUNC('month', (state->>'performedAt')::timestamp)";
-    const breakSql = `
+    let breakSql = `
       SELECT ${groupExpr} AS period_label,
         COALESCE(SUM((state->>'price')::numeric), 0) AS revenue,
         COUNT(*)::int AS transactions
       FROM app.runtime_state,
       jsonb_array_elements(state->'serviceRecords') AS state
       WHERE state->>'tenantId' = $1 AND state->>'voidedAt' IS NULL
-      GROUP BY period_label
-      ORDER BY period_label
     `;
-    dailyBreakdown = await queryRows(ctx, breakSql, [tenantId]);
+    const breakParams = [tenantId];
+    const bpf = buildPeriodFilter(breakSql, breakParams, period);
+    breakSql = bpf.sql;
+    breakSql += ` GROUP BY period_label ORDER BY period_label`;
+    dailyBreakdown = await queryRows(ctx, breakSql, breakParams);
   }
 
   return {
@@ -366,9 +365,11 @@ async function getSalesSummary({ tenantId, period }) {
     jsonb_array_elements(state->'serviceRecords') AS state
     WHERE state->>'tenantId' = $1 AND state->>'voidedAt' IS NULL
   `;
-  buildPeriodFilter(sql, [tenantId], period);
+  const params = [tenantId];
+  const pf = buildPeriodFilter(sql, params, period);
+  sql = pf.sql;
 
-  const stats = await queryOne(ctx, sql, [tenantId]) || {};
+  const stats = await queryOne(ctx, sql, params) || {};
 
   return {
     period,

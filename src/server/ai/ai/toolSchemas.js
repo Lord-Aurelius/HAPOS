@@ -179,7 +179,7 @@ function toolSchemaForProvider(toolId) {
   }
 
   const required = _buildRequired(toolId, paramSchemas);
-  const parameters = { type: "object", properties };
+  const parameters = { type: "object", properties, additionalProperties: false };
   if (required.length > 0) parameters.required = required;
 
   return {

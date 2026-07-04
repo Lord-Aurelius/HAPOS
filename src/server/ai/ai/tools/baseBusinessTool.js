@@ -20,10 +20,14 @@ class BaseBusinessTool extends BaseTool {
   }
 
   async execute({ context, args }) {
+    const safeArgs = { ...args };
+    delete safeArgs.tenantId;
     const result = await this.repo[this._method]({
       tenantId: context.tenantId,
+      userId: context.userId,
+      role: context.role,
       period: args.period,
-      ...args,
+      ...safeArgs,
     });
     return {
       success: true,
