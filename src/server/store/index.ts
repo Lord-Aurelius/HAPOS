@@ -8,9 +8,11 @@ import type {
   AppSession,
   Customer,
   CustomerAppSession,
+  InventoryMovement,
   Product,
   ProductUsage,
   Service,
+  ServiceProductLink,
   ServiceRecord,
   Subscription,
   SubscriptionPackage,
@@ -21,6 +23,7 @@ import { formatPlanCode, getDefaultSubscriptionPackageBlueprints, isPlatinumPlan
 import { normalizeStoreAssetReferences } from '@/server/assets';
 import { getDatabaseConfigHint } from '@/server/db/config';
 import { getPool } from '@/server/db/client';
+import { ensureCatalogProjection } from '@/server/commerce/inventory-store';
 import { getRuntimeBackend } from '@/server/runtime';
 import { createSeedStore } from '@/server/store/seed';
 import { verifyPassword } from '@/server/store/passwords';
@@ -29,9 +32,11 @@ import type {
   StoreCustomer,
   StoreCustomerSession,
   StoreExpense,
+  StoreInventoryMovement,
   StoreLoyaltyProgram,
   StoreProduct,
   StoreService,
+  StoreServiceProductLink,
   StoreServiceRecord,
   StoreSession,
   StoreState,
@@ -384,42 +389,9 @@ function migrateStoreState(parsed: StoreState) {
   // Phase 1 catalog/inventory projection backfill. Legacy products keep
   // unit_cost as the cost basis, sellingPrice null (= needs_pricing), and
   // quantityOnHand 0 (= uncounted — never inferred from usage history).
-  if (!Array.isArray(parsed.serviceProductLinks)) {
-    parsed.serviceProductLinks = [];
-    changed = true;
-  }
-
-  if (!Array.isArray(parsed.inventoryMovements)) {
-    parsed.inventoryMovements = [];
-    changed = true;
-  }
-
-  for (const product of parsed.products) {
-    if (!('sku' in product)) {
-      product.sku = null;
-      changed = true;
-    }
-    if (!('skuGenerated' in product)) {
-      product.skuGenerated = false;
-      changed = true;
-    }
-    if (!('sellingPrice' in product)) {
-      product.sellingPrice = null;
-      changed = true;
-    }
-    if (!('quantityOnHand' in product)) {
-      product.quantityOnHand = 0;
-      changed = true;
-    }
-    if (!('reorderLevel' in product)) {
-      product.reorderLevel = null;
-      changed = true;
-    }
-    if (!('criticalLevel' in product)) {
-      product.criticalLevel = null;
-      changed = true;
-    }
-  }
+  // Single implementation lives in commerce/inventory-store.ts.
+  const catalogProjection = ensureCatalogProjection(parsed);
+  changed = changed || catalogProjection.changed;
 
   return { store: parsed, changed };
 }
@@ -796,6 +768,49 @@ export async function listServicesByTenant(tenantId: string) {
 export async function listProductsByTenant(tenantId: string) {
   const store = await readStore();
   return store.products.filter((product) => product.tenantId === tenantId).map(productFromStore);
+}
+
+function serviceProductLinkFromStore(link: StoreServiceProductLink): ServiceProductLink {
+  return {
+    id: link.id,
+    tenantId: link.tenantId,
+    serviceId: link.serviceId,
+    productId: link.productId,
+    quantity: link.quantity,
+  };
+}
+
+function inventoryMovementFromStore(movement: StoreInventoryMovement): InventoryMovement {
+  return {
+    id: movement.id,
+    tenantId: movement.tenantId,
+    productId: movement.productId,
+    quantity: movement.quantity,
+    movementType: movement.movementType,
+    referenceType: movement.referenceType ?? null,
+    referenceId: movement.referenceId ?? null,
+    unitCost: movement.unitCost ?? null,
+    previousQuantity: movement.previousQuantity,
+    resultingQuantity: movement.resultingQuantity,
+    reason: movement.reason ?? null,
+    createdBy: movement.createdBy ?? null,
+    createdAt: movement.createdAt,
+  };
+}
+
+export async function listServiceProductLinksByTenant(tenantId: string) {
+  const store = await readStore();
+  return (store.serviceProductLinks ?? [])
+    .filter((link) => link.tenantId === tenantId)
+    .map(serviceProductLinkFromStore);
+}
+
+export async function listInventoryMovementsByTenant(tenantId: string, productId?: string) {
+  const store = await readStore();
+  return (store.inventoryMovements ?? [])
+    .filter((movement) => movement.tenantId === tenantId && (!productId || movement.productId === productId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map(inventoryMovementFromStore);
 }
 
 export async function listSubscriptionPackagesStore() {
