@@ -241,6 +241,14 @@ export function createSeedStore(): StoreState {
         unitCost: 120,
         description: 'Hair styling pomade',
         isActive: true,
+        // Phase 1 seed: selling price not yet set by the merchant
+        // (needs_pricing), stock uncounted (0, never inferred).
+        sku: null,
+        skuGenerated: false,
+        sellingPrice: null,
+        quantityOnHand: 0,
+        reorderLevel: null,
+        criticalLevel: null,
         createdAt: now,
         updatedAt: now,
       },
@@ -251,6 +259,12 @@ export function createSeedStore(): StoreState {
         unitCost: 180,
         description: 'Conditioning beard oil',
         isActive: true,
+        sku: null,
+        skuGenerated: false,
+        sellingPrice: null,
+        quantityOnHand: 0,
+        reorderLevel: null,
+        criticalLevel: null,
         createdAt: now,
         updatedAt: now,
       },
@@ -446,5 +460,8 @@ export function createSeedStore(): StoreState {
         createdAt: '2026-04-04T08:10:00.000Z',
       },
     ],
+    // Phase 1 transitional projections start empty (SQL-authoritative later).
+    serviceProductLinks: [],
+    inventoryMovements: [],
   };
 }

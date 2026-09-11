@@ -84,6 +84,39 @@ export type Product = {
   unitCost: number;
   description?: string;
   isActive: boolean;
+  /** Phase 1 catalog fields. `sellingPrice: null` = needs_pricing. */
+  sku?: string | null;
+  skuGenerated?: boolean;
+  sellingPrice?: number | null;
+  quantityOnHand?: number;
+  reorderLevel?: number | null;
+  criticalLevel?: number | null;
+};
+
+export type ServiceProductLink = {
+  id: string;
+  tenantId: string;
+  serviceId: string;
+  productId: string;
+  quantity: number;
+};
+
+export type StockStatus = 'out_of_stock' | 'critical' | 'low' | 'in_stock';
+
+export type InventoryMovement = {
+  id: string;
+  tenantId: string;
+  productId: string;
+  quantity: number;
+  movementType: string;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  unitCost?: number | null;
+  previousQuantity: number;
+  resultingQuantity: number;
+  reason?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
 };
 
 export type ProductUsage = {

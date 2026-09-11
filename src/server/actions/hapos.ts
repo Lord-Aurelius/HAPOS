@@ -1002,6 +1002,14 @@ export async function addProductAction(formData: FormData) {
       unitCost,
       description: formString(formData, 'description'),
       isActive: true,
+      // Phase 1 full catalog fields land in unit 5; defaults preserve the
+      // legacy meaning (uncatalogued, unpriced, uncounted) until then.
+      sku: null,
+      skuGenerated: false,
+      sellingPrice: null,
+      quantityOnHand: 0,
+      reorderLevel: null,
+      criticalLevel: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

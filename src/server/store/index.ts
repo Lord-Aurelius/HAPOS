@@ -381,6 +381,46 @@ function migrateStoreState(parsed: StoreState) {
     }
   }
 
+  // Phase 1 catalog/inventory projection backfill. Legacy products keep
+  // unit_cost as the cost basis, sellingPrice null (= needs_pricing), and
+  // quantityOnHand 0 (= uncounted — never inferred from usage history).
+  if (!Array.isArray(parsed.serviceProductLinks)) {
+    parsed.serviceProductLinks = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.inventoryMovements)) {
+    parsed.inventoryMovements = [];
+    changed = true;
+  }
+
+  for (const product of parsed.products) {
+    if (!('sku' in product)) {
+      product.sku = null;
+      changed = true;
+    }
+    if (!('skuGenerated' in product)) {
+      product.skuGenerated = false;
+      changed = true;
+    }
+    if (!('sellingPrice' in product)) {
+      product.sellingPrice = null;
+      changed = true;
+    }
+    if (!('quantityOnHand' in product)) {
+      product.quantityOnHand = 0;
+      changed = true;
+    }
+    if (!('reorderLevel' in product)) {
+      product.reorderLevel = null;
+      changed = true;
+    }
+    if (!('criticalLevel' in product)) {
+      product.criticalLevel = null;
+      changed = true;
+    }
+  }
+
   return { store: parsed, changed };
 }
 
@@ -718,6 +758,12 @@ function productFromStore(product: StoreProduct): Product {
     unitCost: product.unitCost,
     description: product.description,
     isActive: product.isActive,
+    sku: product.sku ?? null,
+    skuGenerated: product.skuGenerated ?? false,
+    sellingPrice: product.sellingPrice ?? null,
+    quantityOnHand: product.quantityOnHand ?? 0,
+    reorderLevel: product.reorderLevel ?? null,
+    criticalLevel: product.criticalLevel ?? null,
   };
 }
 

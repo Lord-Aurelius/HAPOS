@@ -100,6 +100,43 @@ export type StoreProduct = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  // ── Phase 1 catalog projection (transitional file-mode mirror of the
+  // authoritative SQL columns in db/migrations/phase-01-catalog-inventory.sql).
+  // `sellingPrice: null` means `needs_pricing`; `quantityOnHand: 0` on legacy
+  // rows means `uncounted`, never inferred. Optional so migrateStoreState can
+  // backfill legacy snapshots (same convention as correctedAt/voided*).
+  // Removal milestone: Phase 2/3 SQL cutover (see docs/phase-0-persistence-decision.md).
+  sku?: string | null;
+  skuGenerated?: boolean;
+  sellingPrice?: number | null;
+  quantityOnHand?: number;
+  reorderLevel?: number | null;
+  criticalLevel?: number | null;
+};
+
+export type StoreServiceProductLink = {
+  id: string;
+  tenantId: string;
+  serviceId: string;
+  productId: string;
+  quantity: number;
+  createdAt: string;
+};
+
+export type StoreInventoryMovement = {
+  id: string;
+  tenantId: string;
+  productId: string;
+  quantity: number;
+  movementType: string;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  unitCost?: number | null;
+  previousQuantity: number;
+  resultingQuantity: number;
+  reason?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
 };
 
 export type StoreProductUsage = {
@@ -273,4 +310,7 @@ export type StoreState = {
   customerSessions: StoreCustomerSession[];
   marketplaceAds: StoreMarketplaceAd[];
   customerOrders: StoreCustomerOrder[];
+  // Phase 1 transitional projections (SQL-authoritative; see types above).
+  serviceProductLinks: StoreServiceProductLink[];
+  inventoryMovements: StoreInventoryMovement[];
 };
