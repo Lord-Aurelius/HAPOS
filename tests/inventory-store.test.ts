@@ -123,6 +123,35 @@ describe('consumeServiceBom', () => {
     assert.equal(store.inventoryMovements?.length, 0);
     assert.equal(store.products[0].quantityOnHand, 20);
   });
+
+  it('carries full observability on every movement', () => {
+    const store = testStore();
+    const movement = postInventoryMovement(
+      store,
+      {
+        tenantId: 'tenant-a',
+        productId: 'prod-oil',
+        type: 'RETURN',
+        quantity: 2,
+        referenceType: 'sale_return',
+        referenceId: 'sale-9',
+        reason: 'Customer return, resellable',
+        createdBy: 'admin-1',
+      },
+      { generateId, now: '2026-05-01T10:00:00.000Z' },
+    );
+    // RETURN increases stock; every traceability field is populated.
+    assert.equal(store.products[0].quantityOnHand, 22);
+    assert.equal(movement.tenantId, 'tenant-a');
+    assert.equal(movement.productId, 'prod-oil');
+    assert.equal(movement.movementType, 'RETURN');
+    assert.equal(movement.quantity, 2);
+    assert.equal(movement.referenceType, 'sale_return');
+    assert.equal(movement.referenceId, 'sale-9');
+    assert.equal(movement.reason, 'Customer return, resellable');
+    assert.equal(movement.createdBy, 'admin-1');
+    assert.equal(movement.createdAt, '2026-05-01T10:00:00.000Z');
+  });
 });
 
 describe('replaceServiceBom', () => {
