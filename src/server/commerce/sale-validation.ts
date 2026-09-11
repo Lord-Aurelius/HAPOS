@@ -20,7 +20,10 @@ export type SaleValidationCode =
   | 'unknown-product'
   | 'missing-id'
   | 'missing-name'
-  | 'invalid-date';
+  | 'invalid-date'
+  | 'invalid-sku'
+  | 'duplicate-sku'
+  | 'invalid-threshold';
 
 export class SaleValidationError extends Error {
   readonly code: SaleValidationCode;
