@@ -26,6 +26,8 @@ import type {
 import { subscriptionIncludesMarketplace } from '@/lib/plans';
 import { formatCurrency } from '@/lib/format';
 import { getAccessState } from '@/server/auth/access';
+import { buildCatalogReadModel, type CatalogItem } from '@/server/commerce/catalog';
+import { getStockStatus } from '@/server/commerce/inventory';
 import { calculateCommerceCommission } from '@/server/commerce/commission';
 import {
   getSubscriptionForTenant,
@@ -33,8 +35,10 @@ import {
   listCommissionPayoutsByTenant,
   listCustomersByTenant,
   listExpensesByTenant,
+  listInventoryMovementsByTenant,
   listProductsByTenant,
   listRecordsByTenant,
+  listServiceProductLinksByTenant,
   listServicesByTenant,
   listSmsLogsByTenant,
   listSubscriptionPackagesStore,
@@ -324,6 +328,43 @@ export async function listServices(tenantId: string): Promise<Service[]> {
 
 export async function listProducts(tenantId: string): Promise<Product[]> {
   return listProductsByTenant(tenantId);
+}
+
+export async function listServiceProductLinks(tenantId: string) {
+  return listServiceProductLinksByTenant(tenantId);
+}
+
+export async function listInventoryMovements(tenantId: string, productId?: string) {
+  return listInventoryMovementsByTenant(tenantId, productId);
+}
+
+/**
+ * Merchant-wide sellable catalog with per-product availability. Services
+ * carry no stock; products expose the centralised stock status (§9).
+ */
+export async function getCatalog(tenantId: string, options: { includeInactive?: boolean } = {}) {
+  const [products, services] = await Promise.all([
+    listProductsByTenant(tenantId),
+    listServicesByTenant(tenantId),
+  ]);
+
+  const items: (CatalogItem & { stockStatus: 'out_of_stock' | 'critical' | 'low' | 'in_stock' | null })[] =
+    buildCatalogReadModel({ tenantId, products, services, includeInactive: options.includeInactive }).map((item) => {
+      if (item.type !== 'product') {
+        return { ...item, stockStatus: null };
+      }
+      const product = products.find((candidate) => candidate.id === item.id);
+      return {
+        ...item,
+        stockStatus: getStockStatus({
+          quantityOnHand: item.quantityOnHand ?? 0,
+          reorderLevel: product?.reorderLevel ?? null,
+          criticalLevel: product?.criticalLevel ?? null,
+        }),
+      };
+    });
+
+  return items;
 }
 
 export async function listCustomers(tenantId: string): Promise<Customer[]> {

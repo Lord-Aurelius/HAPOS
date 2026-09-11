@@ -26,6 +26,18 @@ import {
   findExistingSaleRecord,
   normalizeIdempotencyKey,
 } from '@/server/commerce/idempotency';
+import {
+  assertSkuUnique,
+  validateProductInput,
+  validateServiceInput,
+} from '@/server/commerce/catalog';
+import {
+  adjustProductStock,
+  ensureCatalogProjection,
+  postOpeningBalance,
+  replaceServiceBom,
+} from '@/server/commerce/inventory-store';
+import { InventoryError } from '@/server/commerce/inventory';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
 import { voidServiceRecord } from '@/server/store/service-records';
@@ -982,11 +994,19 @@ export async function addProductAction(formData: FormData) {
   const session = await requireSession(['shop_admin', 'super_admin']);
   if (!session.tenant) redirect('/super/tenants');
 
-  let name: string;
-  let unitCost: number;
+  let validated: ReturnType<typeof validateProductInput>;
+  let openingQuantity = 0;
   try {
-    name = requireDisplayName(formString(formData, 'name'), 'name');
-    unitCost = parseMoneyInput(formString(formData, 'unitCost'), 'unitCost');
+    validated = validateProductInput({
+      name: formString(formData, 'name'),
+      description: formString(formData, 'description'),
+      sku: formString(formData, 'sku'),
+      unitCost: formString(formData, 'unitCost'),
+      sellingPrice: formString(formData, 'sellingPrice'),
+      reorderLevel: formString(formData, 'reorderLevel'),
+      criticalLevel: formString(formData, 'criticalLevel'),
+    });
+    openingQuantity = parseProductQuantityInput(formString(formData, 'openingQuantity'), 'openingQuantity');
   } catch (error) {
     if (error instanceof SaleValidationError) {
       redirect(`/app/products?error=${error.code}`);
@@ -994,29 +1014,261 @@ export async function addProductAction(formData: FormData) {
     throw error;
   }
 
-  await updateStore((store) => {
-    store.products.push({
-      id: randomUUID(),
-      tenantId: session.tenant!.id,
-      name,
-      unitCost,
-      description: formString(formData, 'description'),
-      isActive: true,
-      // Phase 1 full catalog fields land in unit 5; defaults preserve the
-      // legacy meaning (uncatalogued, unpriced, uncounted) until then.
-      sku: null,
-      skuGenerated: false,
-      sellingPrice: null,
-      quantityOnHand: 0,
-      reorderLevel: null,
-      criticalLevel: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+  const productId = randomUUID();
+  try {
+    await updateStore((store) => {
+      ensureCatalogProjection(store);
+      assertSkuUnique(store.products, session.tenant!.id, validated.sku);
+
+      const now = new Date().toISOString();
+      store.products.push({
+        id: productId,
+        tenantId: session.tenant!.id,
+        name: validated.name,
+        unitCost: validated.unitCost,
+        description: validated.description,
+        isActive: true,
+        sku: validated.sku,
+        skuGenerated: false,
+        sellingPrice: validated.sellingPrice,
+        quantityOnHand: 0,
+        reorderLevel: validated.reorderLevel,
+        criticalLevel: validated.criticalLevel,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Opening stock is a movement, never a bare number assignment.
+      if (openingQuantity > 0) {
+        postOpeningBalance(
+          store,
+          {
+            tenantId: session.tenant!.id,
+            productId,
+            quantity: openingQuantity,
+            unitCost: validated.unitCost,
+            reason: 'Opening stock on product creation',
+            createdBy: session.user.id,
+          },
+        );
+      }
     });
-  });
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/products?error=${error.code}`);
+    }
+    if (error instanceof InventoryError) {
+      redirect(`/app/products?error=${error.code}`);
+    }
+    throw error;
+  }
 
   touchShopPaths();
   redirect('/app/products?success=added');
+}
+
+export async function updateProductAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) redirect('/super/tenants');
+
+  const productId = formString(formData, 'productId');
+  const redirectTo = `/app/products?productId=${productId}&success=updated`;
+
+  let validated: ReturnType<typeof validateProductInput>;
+  try {
+    validated = validateProductInput({
+      name: formString(formData, 'name'),
+      description: formString(formData, 'description'),
+      sku: formString(formData, 'sku'),
+      unitCost: formString(formData, 'unitCost'),
+      sellingPrice: formString(formData, 'sellingPrice'),
+      reorderLevel: formString(formData, 'reorderLevel'),
+      criticalLevel: formString(formData, 'criticalLevel'),
+    });
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/products?productId=${productId}&error=${error.code}`);
+    }
+    throw error;
+  }
+
+  const isActive = formString(formData, 'isActive') !== 'false';
+
+  let updateError: string | null = null;
+  await updateStore((store) => {
+    ensureCatalogProjection(store);
+    const product = store.products.find((item) => item.id === productId && item.tenantId === session.tenant!.id);
+    if (!product) {
+      updateError = 'product-missing';
+      return;
+    }
+
+    try {
+      assertSkuUnique(store.products, session.tenant!.id, validated.sku, product.id);
+    } catch (error) {
+      updateError = error instanceof SaleValidationError ? error.code : 'product-update-failed';
+      return;
+    }
+
+    product.name = validated.name;
+    product.description = validated.description;
+    product.unitCost = validated.unitCost;
+    product.sku = validated.sku;
+    product.sellingPrice = validated.sellingPrice;
+    product.reorderLevel = validated.reorderLevel;
+    product.criticalLevel = validated.criticalLevel;
+    product.isActive = isActive;
+    product.updatedAt = new Date().toISOString();
+  });
+
+  if (updateError) {
+    redirect(`/app/products?productId=${productId}&error=${updateError}`);
+  }
+
+  touchShopPaths();
+  redirect(redirectTo);
+}
+
+export async function adjustProductStockAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) redirect('/super/tenants');
+
+  const productId = formString(formData, 'productId');
+  const reason = formString(formData, 'reason');
+
+  let countedQuantity = 0;
+  try {
+    countedQuantity = parseProductQuantityInput(formString(formData, 'countedQuantity'), 'countedQuantity');
+    if (!productId) {
+      redirect(`/app/products?productId=${productId}&error=missing-id`);
+    }
+    if (!reason) {
+      redirect(`/app/products?productId=${productId}&error=adjustment-reason-required`);
+    }
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/products?productId=${productId}&error=${error.code}`);
+    }
+    throw error;
+  }
+
+  try {
+    await updateStore((store) => {
+      ensureCatalogProjection(store);
+      adjustProductStock(
+        store,
+        {
+          tenantId: session.tenant!.id,
+          productId,
+          countedQuantity,
+          reason,
+          createdBy: session.user.id,
+        },
+      );
+    });
+  } catch (error) {
+    if (error instanceof SaleValidationError || error instanceof InventoryError) {
+      redirect(`/app/products?productId=${productId}&error=${error.code}`);
+    }
+    throw error;
+  }
+
+  touchShopPaths();
+  redirect(`/app/products?productId=${productId}&success=adjusted`);
+}
+
+export async function updateServiceAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) redirect('/super/tenants');
+
+  const serviceId = formString(formData, 'serviceId');
+  const isActive = formString(formData, 'isActive') !== 'false';
+
+  let validated: ReturnType<typeof validateServiceInput>;
+  try {
+    validated = validateServiceInput({
+      name: formString(formData, 'name'),
+      description: formString(formData, 'description'),
+      price: formString(formData, 'price'),
+      durationMinutes: formString(formData, 'durationMinutes'),
+      commissionType: formString(formData, 'commissionType'),
+      commissionValue: formString(formData, 'commissionValue'),
+    });
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/services?error=${error.code}`);
+    }
+    throw error;
+  }
+
+  let updateError: string | null = null;
+  await updateStore((store) => {
+    const service = store.services.find((item) => item.id === serviceId && item.tenantId === session.tenant!.id);
+    if (!service) {
+      updateError = 'service-missing';
+      return;
+    }
+
+    service.name = validated.name;
+    service.description = validated.description;
+    service.price = validated.price;
+    service.durationMinutes = validated.durationMinutes;
+    service.commissionType = validated.commissionType;
+    service.commissionValue = validated.commissionValue;
+    service.isActive = isActive;
+    service.updatedBy = session.user.id;
+    service.updatedAt = new Date().toISOString();
+  });
+
+  if (updateError) {
+    redirect(`/app/services?error=${updateError}`);
+  }
+
+  touchShopPaths();
+  redirect('/app/services?success=updated');
+}
+
+export async function setServiceConsumptionAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) redirect('/super/tenants');
+
+  const serviceId = formString(formData, 'serviceId');
+
+  // BOM editor submits one `bom_<productId>` quantity field per catalog row;
+  // quantities above zero become consumption links. No JavaScript required.
+  const lines: { productId: string; quantity: number }[] = [];
+  try {
+    for (const [key, value] of formData.entries()) {
+      if (!key.startsWith('bom_') || typeof value !== 'string') {
+        continue;
+      }
+      const productId = key.slice('bom_'.length);
+      const quantity = value.trim() ? parseProductQuantityInput(value, `bom_${productId}`) : 0;
+      if (quantity > 0) {
+        lines.push({ productId, quantity });
+      }
+    }
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/services?error=${error.code}`);
+    }
+    throw error;
+  }
+
+  try {
+    await updateStore((store) => {
+      ensureCatalogProjection(store);
+      replaceServiceBom(store, { tenantId: session.tenant!.id, serviceId, lines });
+    });
+  } catch (error) {
+    if (error instanceof SaleValidationError || error instanceof InventoryError) {
+      redirect(`/app/services?error=${error.code}`);
+    }
+    throw error;
+  }
+
+  touchShopPaths();
+  redirect('/app/services?success=consumption-updated');
 }
 
 export async function addExpenseAction(formData: FormData) {
