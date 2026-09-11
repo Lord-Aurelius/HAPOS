@@ -294,18 +294,17 @@ function buildLoyaltyProgress(program: LoyaltyProgram | null | undefined, lifeti
   };
 }
 
-const DEFAULT_PUBLIC_APP_URL = 'https://hapos-63oc.onrender.com';
+// Public URL builders are centralised in server/config/public-url.ts (Phase 0.5)
+// so booking links, QR payloads and future seller-transaction URLs always
+// share one environment-derived host. These re-exports keep existing imports
+// working without change.
+import { buildCustomerBookingUrl as buildBookingUrl } from '@/server/config/public-url';
 
-export function getPublicAppBaseUrl() {
-  return DEFAULT_PUBLIC_APP_URL;
-}
-
-export function buildCustomerBookingUrl(slug: string) {
-  const path = `/book/${slug}`;
-  const baseUrl = getPublicAppBaseUrl();
-
-  return baseUrl ? `${baseUrl}${path}` : path;
-}
+export {
+  buildCustomerBookingUrl,
+  buildSellerTransactionUrl,
+  getPublicAppBaseUrl,
+} from '@/server/config/public-url';
 
 export async function listTenants(): Promise<Tenant[]> {
   return listTenantsStore();
@@ -457,7 +456,7 @@ export async function getTenantBookingContext(businessSlug: string) {
       endsAt: subscription?.endsAt,
       graceEndsAt: subscription?.graceEndsAt,
     }),
-    bookingUrl: buildCustomerBookingUrl(tenant.slug),
+    bookingUrl: buildBookingUrl(tenant.slug),
   };
 }
 
