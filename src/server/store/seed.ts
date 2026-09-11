@@ -272,6 +272,7 @@ export function createSeedStore(): StoreState {
         productUsages: [{ productId: 'product-pomade', quantity: 1, unitCost: 120 }],
         performedAt: '2026-04-04T07:45:00.000Z',
         recordedBy: 'user-staff-brian',
+        idempotencyKey: null,
         createdAt: '2026-04-04T07:45:00.000Z',
       },
       {
@@ -290,6 +291,7 @@ export function createSeedStore(): StoreState {
         productUsages: [{ productId: 'product-beard-oil', quantity: 1, unitCost: 180 }],
         performedAt: '2026-04-03T14:30:00.000Z',
         recordedBy: 'user-staff-mercy',
+        idempotencyKey: null,
         createdAt: '2026-04-03T14:30:00.000Z',
       },
       {
@@ -308,6 +310,7 @@ export function createSeedStore(): StoreState {
         productUsages: [],
         performedAt: '2026-04-02T16:10:00.000Z',
         recordedBy: 'user-staff-brian',
+        idempotencyKey: null,
         createdAt: '2026-04-02T16:10:00.000Z',
       },
     ],

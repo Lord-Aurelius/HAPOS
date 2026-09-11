@@ -85,6 +85,33 @@ describe('claimIdempotentSale (exactly-once semantics)', () => {
     assert.ok(outcomes.some((o) => o.duplicate));
   });
 
+  it('retries skip side effects (no second SMS, no second customer touch)', () => {
+    // Mirrors the recordServiceAction mutator contract: the duplicate branch
+    // returns before customer upsert / SMS enqueue.
+    const records: ReturnType<typeof makeServiceRecord>[] = [];
+    const smsQueue: string[] = [];
+    const key = 'idem-key-0005';
+
+    function submit() {
+      const claimed = claimIdempotentSale(records, 'tenant-test-shop', key, () => {
+        const record = makeServiceRecord({ idempotencyKey: key });
+        records.push(record);
+        return record;
+      });
+      if (!claimed.duplicate) {
+        smsQueue.push(`sms-for-${claimed.record.id}`);
+      }
+      return claimed;
+    }
+
+    const first = submit();
+    const retry = submit();
+    assert.equal(first.duplicate, false);
+    assert.equal(retry.duplicate, true);
+    assert.equal(records.length, 1);
+    assert.equal(smsQueue.length, 1);
+  });
+
   it('different keys create distinct transactions', () => {
     const records: ReturnType<typeof makeServiceRecord>[] = [];
     for (const key of ['idem-key-0003', 'idem-key-0004']) {

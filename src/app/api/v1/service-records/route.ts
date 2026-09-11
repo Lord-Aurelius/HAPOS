@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { apiBadRequest, apiCreated, apiOk } from '@/server/http/api';
 import { parseDateTimeInputValue } from '@/lib/date-time';
 import { requireSession } from '@/server/auth/demo-session';
+import {
+  IdempotencyKeyError,
+  findExistingSaleRecord,
+  normalizeIdempotencyKey,
+} from '@/server/commerce/idempotency';
 import { SaleValidationError, parseMoneyInput, requireDisplayName } from '@/server/commerce/sale-validation';
 import { calculateCommission, listServiceRecords } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
@@ -55,7 +60,23 @@ export async function POST(request: Request) {
     throw error;
   }
 
+  let requestedIdempotencyKey: string | null = null;
+  try {
+    requestedIdempotencyKey = normalizeIdempotencyKey(body?.idempotencyKey);
+  } catch (error) {
+    if (error instanceof IdempotencyKeyError) {
+      return apiBadRequest(error.message);
+    }
+    throw error;
+  }
+
   const result = await updateStore((store) => {
+    // Exactly-once claim inside the atomic mutator (see recordServiceAction).
+    const duplicate = findExistingSaleRecord(store.serviceRecords, session.tenant!.id, requestedIdempotencyKey);
+    if (duplicate) {
+      return { ok: true as const, record: duplicate, smsIds: [] as string[], duplicate: true as const };
+    }
+
     const requestedStaffId = session.user.role === 'staff' ? session.user.id : String(body?.staffId ?? '');
     const staff = store.users.find(
       (item) =>
@@ -110,6 +131,7 @@ export async function POST(request: Request) {
       voidedAt: null,
       voidedBy: null,
       voidReason: null,
+      idempotencyKey: requestedIdempotencyKey ?? randomUUID(),
       createdAt: new Date().toISOString(),
     };
     store.serviceRecords.push(record);
@@ -129,7 +151,7 @@ export async function POST(request: Request) {
       });
     }
 
-    return { ok: true as const, record, smsIds: smsId ? [smsId] : [] };
+    return { ok: true as const, record, smsIds: smsId ? [smsId] : [], duplicate: false as const };
   });
 
   if (!result.ok) {
@@ -137,5 +159,9 @@ export async function POST(request: Request) {
   }
 
   await dispatchSmsLogs(result.smsIds);
+  // Retried keys return the original record with 200 (not a second 201).
+  if (result.duplicate) {
+    return apiOk(result.record);
+  }
   return apiCreated(result.record);
 }

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { FormSubmitButton } from '@/components/ui/form-submit-button';
 import { toDateTimeInputValue } from '@/lib/date-time';
 import { formatCurrency } from '@/lib/format';
@@ -27,6 +29,9 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
   ]);
   const staff = users.filter((user) => user.role === 'staff' || user.role === 'shop_admin');
   const hasServices = services.length > 0;
+  // One idempotency key per render: double-click / network retry resubmits the
+  // same key and the server returns the original sale instead of duplicating.
+  const idempotencyKey = randomUUID();
 
   return (
     <>
@@ -53,6 +58,8 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                 ? 'Enter a whole-number product quantity before saving.'
               : params.error === 'unknown-product'
                 ? 'The selected product is not available for this shop. Choose another product or save without one.'
+              : params.error === 'invalid-idempotency-key'
+                ? 'That submission carried an invalid retry key. Refresh the page and submit once.'
               : params.error === 'no-services'
                 ? 'This shop has no price-list services yet. Use Custom service for now or add services first.'
                 : params.error === 'staff-not-found'
@@ -90,6 +97,7 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
 
           <form action={recordServiceAction} className="field-grid">
             <input type="hidden" name="tenantTimeZone" value={tenant.timezone} />
+            <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
             <div className="field-row">
               <div className="field">
                 <label htmlFor="customerName">Customer name</label>

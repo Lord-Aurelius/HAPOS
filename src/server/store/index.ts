@@ -322,6 +322,10 @@ function migrateStoreState(parsed: StoreState) {
       record.voidReason = null;
       changed = true;
     }
+    if (!('idempotencyKey' in record)) {
+      record.idempotencyKey = null;
+      changed = true;
+    }
   }
 
   for (const ad of parsed.marketplaceAds) {

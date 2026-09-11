@@ -129,6 +129,11 @@ export type StoreServiceRecord = {
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
+  /**
+   * Phase 0.4 server-side idempotency key. Unique per tenant for records
+   * created after Phase 0; legacy records backfill to `null` (no key).
+   */
+  idempotencyKey?: string | null;
   createdAt: string;
 };
 

@@ -20,6 +20,11 @@ import {
   requireDisplayName,
   resolveProductUsage,
 } from '@/server/commerce/sale-validation';
+import {
+  IdempotencyKeyError,
+  findExistingSaleRecord,
+  normalizeIdempotencyKey,
+} from '@/server/commerce/idempotency';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
 import { voidServiceRecord } from '@/server/store/service-records';
@@ -524,6 +529,9 @@ export async function approveCustomerOrderToSalesAction(formData: FormData) {
       voidedAt: null,
       voidedBy: null,
       voidReason: null,
+      // Approval is already exactly-once via the order's approvedRecordId
+      // link; no client key participates here.
+      idempotencyKey: null,
       createdAt: now,
     });
 
@@ -589,6 +597,16 @@ export async function recordServiceAction(formData: FormData) {
     redirect('/app/service-entry?error=invalid-date');
   }
 
+  let requestedIdempotencyKey: string | null = null;
+  try {
+    requestedIdempotencyKey = normalizeIdempotencyKey(formString(formData, 'idempotencyKey'));
+  } catch (error) {
+    if (error instanceof IdempotencyKeyError) {
+      redirect('/app/service-entry?error=invalid-idempotency-key');
+    }
+    throw error;
+  }
+
   let customPrice = 0;
   let productQuantity = 0;
   try {
@@ -607,6 +625,14 @@ export async function recordServiceAction(formData: FormData) {
 
   const result = await updateStore((store) => {
     const tenantId = session.tenant!.id;
+
+    // Phase 0.4: exactly-once claim runs INSIDE the atomic mutator, before any
+    // customer upsert or SMS enqueue, so retries never duplicate side effects.
+    const duplicate = findExistingSaleRecord(store.serviceRecords, tenantId, requestedIdempotencyKey);
+    if (duplicate) {
+      return { ok: true as const, smsIds: [] as string[], duplicate: true as const };
+    }
+
     const tenantUsers = store.users.filter((user) => user.tenantId === tenantId);
     const tenantServices = store.services.filter((service) => service.tenantId === tenantId);
     const customer = upsertTenantCustomer(store, {
@@ -669,6 +695,9 @@ export async function recordServiceAction(formData: FormData) {
       voidedAt: null,
       voidedBy: null,
       voidReason: null,
+      // Keyless writes (legacy clients) mint a fresh key so every post-Phase-0
+      // record carries one; future QR/PaymentOS retries reuse the client key.
+      idempotencyKey: requestedIdempotencyKey ?? randomUUID(),
       createdAt: now,
     });
 
@@ -684,7 +713,7 @@ export async function recordServiceAction(formData: FormData) {
       createdAt: new Date().toISOString(),
     });
 
-    return { ok: true as const, smsIds: [smsId] };
+    return { ok: true as const, smsIds: [smsId], duplicate: false as const };
   });
 
   if (!result.ok) {
