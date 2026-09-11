@@ -3,16 +3,31 @@ import { addExpenseAction } from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
 import { getFinancialRows, listExpenses } from '@/server/services/app-data';
 
-export default async function ExpensesPage() {
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ success?: string; error?: string }>;
+}) {
   const session = await requireSession(['shop_admin', 'super_admin']);
   if (!session.tenant) {
     return null;
   }
 
+  const params = await searchParams;
   const [expenses, financialRows] = await Promise.all([
     listExpenses(session.tenant.id),
     getFinancialRows(session.tenant.id),
   ]);
+  const feedback =
+    params.error === 'invalid-amount'
+      ? 'Enter a valid expense amount before saving. Amounts cannot be blank, negative, or non-numeric.'
+      : params.error === 'invalid-date'
+        ? 'Enter a valid expense date (YYYY-MM-DD) before saving.'
+        : params.error === 'missing-name'
+          ? 'Enter an expense category before saving.'
+          : params.success === 'added'
+            ? 'Expense recorded.'
+            : null;
 
   return (
     <>
@@ -23,6 +38,12 @@ export default async function ExpensesPage() {
           Expenses feed directly into daily and monthly profit calculations so admin users can see operational reality, not just gross sales.
         </p>
       </section>
+
+      {feedback ? (
+        <section className="panel">
+          <span className="pill">{feedback}</span>
+        </section>
+      ) : null}
 
       <section className="grid-two">
         <div className="panel">

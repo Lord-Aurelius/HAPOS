@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { parseDateTimeInputValue } from '@/lib/date-time';
 import { apiBadRequest, apiOk } from '@/server/http/api';
 import { requireSession } from '@/server/auth/demo-session';
+import {
+  SaleValidationError,
+  parseMoneyInput,
+  parseProductQuantityInput,
+  resolveProductUsage,
+} from '@/server/commerce/sale-validation';
 import { calculateCommission, listServiceRecords } from '@/server/services/app-data';
 import { voidServiceRecord } from '@/server/store/service-records';
 import { updateStore } from '@/server/store';
@@ -40,12 +46,9 @@ function upsertTenantCustomer(
 }
 
 function buildProductUsages(store: StoreState, tenantId: string, productId: string | null, productQuantity: number) {
-  if (!productId || productQuantity <= 0) {
-    return [];
-  }
-
-  const product = store.products.find((item) => item.tenantId === tenantId && item.id === productId);
-  return product ? [{ productId, quantity: productQuantity, unitCost: product.unitCost }] : [];
+  // Unknown products throw SaleValidationError instead of silently resolving
+  // to []. Callers translate this into HTTP 400.
+  return resolveProductUsage(store.products, tenantId, productId, productQuantity);
 }
 
 type RouteProps = {
@@ -102,6 +105,20 @@ export async function PATCH(request: Request, { params }: RouteProps) {
     return apiBadRequest('Custom services require a name and positive price.');
   }
 
+  let customPrice = 0;
+  let productQuantity = 0;
+  try {
+    customPrice = body.customPrice !== undefined && body.customPrice !== null && String(body.customPrice).trim()
+      ? parseMoneyInput(body.customPrice, 'customPrice')
+      : 0;
+    productQuantity = parseProductQuantityInput(body.productQuantity ?? 0, 'productQuantity');
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      return apiBadRequest(error.message);
+    }
+    throw error;
+  }
+
   try {
     const updatedRecord = await updateStore((store) => {
       const record = store.serviceRecords.find((item) => item.id === recordId && item.tenantId === session.tenant!.id);
@@ -140,7 +157,7 @@ export async function PATCH(request: Request, { params }: RouteProps) {
         throw new Error('Customer not found.');
       }
 
-      const price = service ? service.price : Number(body.customPrice);
+      const price = service ? service.price : customPrice;
       const commission = calculateCommission({
         service: service ? { commissionType: service.commissionType, commissionValue: service.commissionValue } : null,
         staff: { commissionType: staff.commissionType, commissionValue: staff.commissionValue },
@@ -161,7 +178,7 @@ export async function PATCH(request: Request, { params }: RouteProps) {
         store,
         tenantId,
         typeof body.productId === 'string' ? body.productId : null,
-        Number(body.productQuantity ?? 0),
+        productQuantity,
       );
       record.performedAt = performedAt ?? record.performedAt;
       record.correctedAt = new Date().toISOString();

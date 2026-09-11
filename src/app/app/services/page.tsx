@@ -12,6 +12,18 @@ function getMessage(params: { success?: string; error?: string }) {
     return 'Upload a valid image file before saving the service picture.';
   }
 
+  if (params.error === 'invalid-price') {
+    return 'Enter a valid service price before saving. Prices cannot be blank, negative, or non-numeric.';
+  }
+
+  if (params.error === 'invalid-quantity') {
+    return 'Enter a whole-number duration in minutes, or leave it blank.';
+  }
+
+  if (params.error === 'missing-name') {
+    return 'Enter a service name before saving to the price list.';
+  }
+
   if (params.success === 'image-updated') {
     return 'Service image updated. Staff and customers will now see the new visual in the price list.';
   }

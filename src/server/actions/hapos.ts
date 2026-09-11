@@ -11,6 +11,15 @@ import { storeImageAsset } from '@/server/assets';
 import { getAccessState } from '@/server/auth/access';
 import { signInCustomerSession, signOutCustomerSession } from '@/server/auth/customer-session';
 import { requireSession, signInSession, signOutSession } from '@/server/auth/demo-session';
+import {
+  SaleValidationError,
+  parseExpenseDateInput,
+  parseMoneyInput,
+  parseOptionalMoneyInput,
+  parseProductQuantityInput,
+  requireDisplayName,
+  resolveProductUsage,
+} from '@/server/commerce/sale-validation';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
 import { voidServiceRecord } from '@/server/store/service-records';
@@ -203,14 +212,10 @@ function upsertTenantCustomer(store: StoreState, input: { tenantId: string; cust
 }
 
 function buildProductUsages(store: StoreState, tenantId: string, productId: string, productQuantity: number) {
-  const tenantProducts = store.products.filter((product) => product.tenantId === tenantId);
-
-  if (!productId || productQuantity <= 0) {
-    return [];
-  }
-
-  const product = tenantProducts.find((item) => item.id === productId);
-  return product ? [{ productId, quantity: productQuantity, unitCost: product.unitCost }] : [];
+  // Unknown products throw SaleValidationError('unknown-product') instead of
+  // silently resolving to []. Empty productId / zero quantity stays [] so the
+  // service-entry default (qty=1, no product) remains a no-op.
+  return resolveProductUsage(store.products, tenantId, productId || null, productQuantity);
 }
 
 function ensurePlatinumTenant(store: StoreState, tenantId: string) {
@@ -568,11 +573,11 @@ export async function recordServiceAction(formData: FormData) {
   const serviceMode = formString(formData, 'serviceMode');
   const selectedServiceId = formString(formData, 'serviceId');
   const customServiceName = formString(formData, 'customServiceName');
-  const customPrice = formNumber(formData, 'customPrice');
+  const customPriceRaw = formString(formData, 'customPrice');
   const staffId = session.user.role === 'staff' ? session.user.id : formString(formData, 'staffId');
   const description = formString(formData, 'description');
   const productId = formString(formData, 'productId');
-  const productQuantity = formNumber(formData, 'productQuantity');
+  const productQuantityRaw = formString(formData, 'productQuantity');
   const performedAtRaw = formString(formData, 'performedAt');
   const performedAt = formDateTimeStringForTimeZone(formData, 'performedAt', tenantTimeZone);
 
@@ -582,6 +587,18 @@ export async function recordServiceAction(formData: FormData) {
 
   if (performedAtRaw && !performedAt) {
     redirect('/app/service-entry?error=invalid-date');
+  }
+
+  let customPrice = 0;
+  let productQuantity = 0;
+  try {
+    customPrice = customPriceRaw ? parseMoneyInput(customPriceRaw, 'customPrice') : 0;
+    productQuantity = parseProductQuantityInput(productQuantityRaw);
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/service-entry?error=${error.code}`);
+    }
+    throw error;
   }
 
   if (serviceMode === 'custom' && (!customServiceName || customPrice <= 0)) {
@@ -620,7 +637,15 @@ export async function recordServiceAction(formData: FormData) {
       price,
     });
 
-    const usages = buildProductUsages(store, tenantId, productId, productQuantity);
+    let usages: { productId: string; quantity: number; unitCost: number }[];
+    try {
+      usages = buildProductUsages(store, tenantId, productId, productQuantity);
+    } catch (error) {
+      if (error instanceof SaleValidationError) {
+        return { ok: false as const, error: error.code as 'unknown-product' | 'invalid-quantity' };
+      }
+      throw error;
+    }
     const now = new Date().toISOString();
 
     store.serviceRecords.push({
@@ -682,11 +707,11 @@ export async function updateServiceRecordAction(formData: FormData) {
   const serviceMode = formString(formData, 'serviceMode');
   const selectedServiceId = formString(formData, 'serviceId');
   const customServiceName = formString(formData, 'customServiceName');
-  const customPrice = formNumber(formData, 'customPrice');
+  const customPriceRaw = formString(formData, 'customPrice');
   const staffId = formString(formData, 'staffId');
   const description = formString(formData, 'description');
   const productId = formString(formData, 'productId');
-  const productQuantity = formNumber(formData, 'productQuantity');
+  const productQuantityRaw = formString(formData, 'productQuantity');
   const performedAtRaw = formString(formData, 'performedAt');
   const performedAt = formDateTimeStringForTimeZone(formData, 'performedAt', tenantTimeZone);
 
@@ -698,24 +723,42 @@ export async function updateServiceRecordAction(formData: FormData) {
     redirect(`/app/sales?recordId=${recordId}&error=invalid-date`);
   }
 
+  let customPrice = 0;
+  let productQuantity = 0;
+  try {
+    customPrice = customPriceRaw ? parseMoneyInput(customPriceRaw, 'customPrice') : 0;
+    productQuantity = parseProductQuantityInput(productQuantityRaw);
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/sales?recordId=${recordId}&error=${error.code}`);
+    }
+    throw error;
+  }
+
   if (serviceMode === 'custom' && (!customServiceName || customPrice <= 0)) {
     redirect(`/app/sales?recordId=${recordId}&error=custom-service`);
   }
 
+  // Validation failures inside the mutator are collected into `updateError`
+  // and redirected (explicit UX) instead of throwing raw 500s.
+  let updateError: string | null = null;
   await updateStore((store) => {
     const record = store.serviceRecords.find((item) => item.id === recordId && item.tenantId === tenantId);
     if (!record) {
-      throw new Error('Service record not found.');
+      updateError = 'record-missing';
+      return;
     }
     if (record.voidedAt) {
-      throw new Error('This sale has already been removed from the ledger.');
+      updateError = 'record-voided';
+      return;
     }
 
     const tenantUsers = store.users.filter((user) => user.tenantId === tenantId);
     const tenantServices = store.services.filter((service) => service.tenantId === tenantId);
     const staff = tenantUsers.find((user) => user.id === staffId);
     if (!staff) {
-      throw new Error('Staff member not found for this tenant.');
+      updateError = 'record-staff';
+      return;
     }
 
     const customer = upsertTenantCustomer(store, {
@@ -730,7 +773,16 @@ export async function updateServiceRecordAction(formData: FormData) {
         : null;
 
     if (serviceMode === 'price-list' && !service) {
-      throw new Error('Selected service is not available for this tenant.');
+      updateError = 'record-service';
+      return;
+    }
+
+    let usages: { productId: string; quantity: number; unitCost: number }[];
+    try {
+      usages = buildProductUsages(store, tenantId, productId, productQuantity);
+    } catch (error) {
+      updateError = error instanceof SaleValidationError ? error.code : 'record-update-failed';
+      return;
     }
 
     const price = service ? service.price : customPrice;
@@ -751,11 +803,15 @@ export async function updateServiceRecordAction(formData: FormData) {
     record.commissionType = commission.commissionType;
     record.commissionValue = commission.commissionValue;
     record.commissionAmount = commission.commissionAmount;
-    record.productUsages = buildProductUsages(store, tenantId, productId, productQuantity);
+    record.productUsages = usages;
     record.performedAt = performedAt ?? record.performedAt;
     record.correctedAt = new Date().toISOString();
     record.correctedBy = session.user.id;
   });
+
+  if (updateError) {
+    redirect(`/app/sales?recordId=${recordId}&error=${updateError}`);
+  }
 
   touchShopPaths();
   revalidatePath(`/app/receipts/${recordId}`);
@@ -807,17 +863,35 @@ export async function addServiceAction(formData: FormData) {
     redirect('/app/services?error=image-upload');
   }
 
+  let name: string;
+  let price: number;
+  let commissionValue: number;
+  let durationMinutes: number | undefined;
+  try {
+    name = requireDisplayName(formString(formData, 'name'), 'name');
+    price = parseMoneyInput(formString(formData, 'price'), 'price');
+    commissionValue = parseOptionalMoneyInput(formString(formData, 'commissionValue'), 'commissionValue') ?? 0;
+    const durationRaw = formString(formData, 'durationMinutes');
+    const durationParsed = durationRaw ? parseProductQuantityInput(durationRaw, 'durationMinutes') : 0;
+    durationMinutes = durationParsed > 0 ? durationParsed : undefined;
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/services?error=${error.code}`);
+    }
+    throw error;
+  }
+
   await updateStore((store) => {
     store.services.push({
       id: serviceId,
       tenantId: session.tenant!.id,
-      name: formString(formData, 'name'),
-      price: formNumber(formData, 'price'),
+      name,
+      price,
       description: formString(formData, 'description'),
       imageUrl,
       commissionType,
-      commissionValue: formNumber(formData, 'commissionValue'),
-      durationMinutes: formNumber(formData, 'durationMinutes') || undefined,
+      commissionValue,
+      durationMinutes,
       isActive: true,
       createdBy: session.user.id,
       updatedBy: session.user.id,
@@ -867,12 +941,24 @@ export async function addProductAction(formData: FormData) {
   const session = await requireSession(['shop_admin', 'super_admin']);
   if (!session.tenant) redirect('/super/tenants');
 
+  let name: string;
+  let unitCost: number;
+  try {
+    name = requireDisplayName(formString(formData, 'name'), 'name');
+    unitCost = parseMoneyInput(formString(formData, 'unitCost'), 'unitCost');
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/products?error=${error.code}`);
+    }
+    throw error;
+  }
+
   await updateStore((store) => {
     store.products.push({
       id: randomUUID(),
       tenantId: session.tenant!.id,
-      name: formString(formData, 'name'),
-      unitCost: formNumber(formData, 'unitCost'),
+      name,
+      unitCost,
       description: formString(formData, 'description'),
       isActive: true,
       createdAt: new Date().toISOString(),
@@ -888,14 +974,28 @@ export async function addExpenseAction(formData: FormData) {
   const session = await requireSession(['shop_admin', 'super_admin']);
   if (!session.tenant) redirect('/super/tenants');
 
+  let category: string;
+  let amount: number;
+  let expenseDate: string;
+  try {
+    category = requireDisplayName(formString(formData, 'category'), 'category');
+    amount = parseMoneyInput(formString(formData, 'amount'), 'amount', 'invalid-amount');
+    expenseDate = parseExpenseDateInput(formString(formData, 'expenseDate'));
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      redirect(`/app/expenses?error=${error.code}`);
+    }
+    throw error;
+  }
+
   await updateStore((store) => {
     store.expenses.push({
       id: randomUUID(),
       tenantId: session.tenant!.id,
-      category: formString(formData, 'category'),
+      category,
       description: formString(formData, 'description'),
-      amount: formNumber(formData, 'amount'),
-      expenseDate: formString(formData, 'expenseDate'),
+      amount,
+      expenseDate,
       createdBy: session.user.id,
       createdAt: new Date().toISOString(),
     });

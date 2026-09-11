@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { apiBadRequest, apiCreated, apiOk } from '@/server/http/api';
 import { parseDateTimeInputValue } from '@/lib/date-time';
 import { requireSession } from '@/server/auth/demo-session';
+import { SaleValidationError, parseMoneyInput, requireDisplayName } from '@/server/commerce/sale-validation';
 import { calculateCommission, listServiceRecords } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
 import { updateStore } from '@/server/store';
@@ -38,6 +39,22 @@ export async function POST(request: Request) {
     return apiBadRequest('performedAt must be a valid ISO date-time or datetime-local value.');
   }
 
+  let price: number;
+  try {
+    price = parseMoneyInput(body?.price, 'price');
+    if (!body?.serviceId) {
+      requireDisplayName(typeof body?.serviceName === 'string' ? body.serviceName : '', 'serviceName');
+      if (price <= 0) {
+        return apiBadRequest('Custom services require a name and positive price.');
+      }
+    }
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      return apiBadRequest(error.message);
+    }
+    throw error;
+  }
+
   const result = await updateStore((store) => {
     const requestedStaffId = session.user.role === 'staff' ? session.user.id : String(body?.staffId ?? '');
     const staff = store.users.find(
@@ -70,7 +87,7 @@ export async function POST(request: Request) {
     const commission = calculateCommission({
       service: service ? { commissionType: service.commissionType, commissionValue: service.commissionValue } : null,
       staff: { commissionType: staff.commissionType, commissionValue: staff.commissionValue },
-      price: Number(body.price),
+      price,
     });
     const record = {
       id: randomUUID(),
@@ -78,9 +95,9 @@ export async function POST(request: Request) {
       customerId: body.customerId,
       staffId: staff.id,
       serviceId: body.serviceId ?? null,
-      serviceName: body.serviceName ?? service?.name ?? 'Custom service',
+      serviceName: typeof body.serviceName === 'string' && body.serviceName.trim() ? body.serviceName.trim() : (service?.name ?? 'Custom service'),
       isCustomService: !body.serviceId,
-      price: Number(body.price),
+      price,
       description: body.description,
       commissionType: commission.commissionType,
       commissionValue: commission.commissionValue,

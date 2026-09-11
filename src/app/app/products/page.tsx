@@ -3,13 +3,26 @@ import { addProductAction } from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
 import { listProducts } from '@/server/services/app-data';
 
-export default async function ProductsPage() {
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ success?: string; error?: string }>;
+}) {
   const session = await requireSession(['shop_admin', 'super_admin']);
   if (!session.tenant) {
     return null;
   }
 
+  const params = await searchParams;
   const products = await listProducts(session.tenant.id);
+  const feedback =
+    params.error === 'invalid-price'
+      ? 'Enter a valid unit cost before saving. Costs cannot be blank, negative, or non-numeric.'
+      : params.error === 'missing-name'
+        ? 'Enter a product name before saving.'
+        : params.success === 'added'
+          ? 'Product added to the catalog.'
+          : null;
 
   return (
     <>
@@ -20,6 +33,12 @@ export default async function ProductsPage() {
           Monthly reports can only surface the most-used products and their costs if product usage is captured during service entry.
         </p>
       </section>
+
+      {feedback ? (
+        <section className="panel">
+          <span className="pill">{feedback}</span>
+        </section>
+      ) : null}
 
       <section className="grid-two">
         <div className="panel">

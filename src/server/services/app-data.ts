@@ -26,6 +26,7 @@ import type {
 import { subscriptionIncludesMarketplace } from '@/lib/plans';
 import { formatCurrency } from '@/lib/format';
 import { getAccessState } from '@/server/auth/access';
+import { calculateCommerceCommission } from '@/server/commerce/commission';
 import {
   getSubscriptionForTenant,
   listAllCustomersByTenant,
@@ -465,16 +466,8 @@ export function calculateCommission(input: {
   staff?: Pick<User, 'commissionType' | 'commissionValue'> | null;
   price: number;
 }): { commissionType: CommissionType; commissionValue: number; commissionAmount: number } {
-  const commissionType = input.staff?.commissionType ?? input.service?.commissionType ?? 'percentage';
-  const commissionValue = input.staff?.commissionValue ?? input.service?.commissionValue ?? 0;
-  const commissionAmount =
-    commissionType === 'fixed' ? commissionValue : Math.round((input.price * commissionValue) / 100);
-
-  return {
-    commissionType,
-    commissionValue,
-    commissionAmount,
-  };
+  // Single implementation lives in commerce/commission.ts (Phase 0.2).
+  return calculateCommerceCommission(input);
 }
 
 export async function getStaffMetrics(tenantId: string, staffId: string): Promise<StaffMetrics> {

@@ -25,6 +25,34 @@ function getMessage(params: { success?: string; error?: string }) {
     return 'Enter a valid service date and time before saving.';
   }
 
+  if (params.error === 'invalid-price') {
+    return 'Enter a valid custom price before saving. Prices cannot be blank, negative, or non-numeric.';
+  }
+
+  if (params.error === 'invalid-quantity') {
+    return 'Enter a whole-number product quantity before saving.';
+  }
+
+  if (params.error === 'unknown-product') {
+    return 'The selected product is not available for this shop. Choose another product or save without one.';
+  }
+
+  if (params.error === 'record-voided') {
+    return 'That sale was already removed from the ledger and can no longer be corrected.';
+  }
+
+  if (params.error === 'record-staff') {
+    return 'Choose an active staff member for this shop before saving the correction.';
+  }
+
+  if (params.error === 'record-service') {
+    return 'The selected price-list service is not available for this shop. Choose another service or use Custom service.';
+  }
+
+  if (params.error === 'record-update-failed') {
+    return 'That correction could not be saved. Check the entered values and try again.';
+  }
+
   if (params.error === 'record-missing') {
     return 'That sale could not be found. It may already have been removed from the ledger.';
   }

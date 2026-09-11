@@ -1,5 +1,10 @@
 import { apiBadRequest, apiCreated, apiOk } from '@/server/http/api';
 import { requireSession } from '@/server/auth/demo-session';
+import {
+  SaleValidationError,
+  parseExpenseDateInput,
+  parseMoneyInput,
+} from '@/server/commerce/sale-validation';
 import { listCommissionPayouts } from '@/server/services/app-data';
 import { readStore, updateStore } from '@/server/store';
 import { randomUUID } from 'node:crypto';
@@ -27,12 +32,28 @@ export async function POST(request: Request) {
     return apiBadRequest('Staff member not found for this tenant.');
   }
 
+  let amount: number;
+  try {
+    amount = parseMoneyInput(body?.amount, 'amount', 'invalid-amount');
+    if (body?.periodStart !== undefined) {
+      parseExpenseDateInput(body.periodStart, 'periodStart');
+    }
+    if (body?.periodEnd !== undefined) {
+      parseExpenseDateInput(body.periodEnd, 'periodEnd');
+    }
+  } catch (error) {
+    if (error instanceof SaleValidationError) {
+      return apiBadRequest(error.message);
+    }
+    throw error;
+  }
+
   const created = await updateStore((store) => {
     const record = {
       id: randomUUID(),
       tenantId: session.tenant!.id,
       staffId: staff.id,
-      amount: Number(body.amount),
+      amount,
       periodStart: body.periodStart,
       periodEnd: body.periodEnd,
       paidAt: body.paidAt ?? null,
