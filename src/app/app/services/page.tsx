@@ -1,7 +1,12 @@
 import { formatCurrency } from '@/lib/format';
-import { addServiceAction, updateServiceImageAction } from '@/server/actions/hapos';
+import {
+  addServiceAction,
+  setServiceConsumptionAction,
+  updateServiceAction,
+  updateServiceImageAction,
+} from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
-import { listServices } from '@/server/services/app-data';
+import { listProducts, listServiceProductLinks, listServices } from '@/server/services/app-data';
 
 type ServicesPageProps = {
   searchParams: Promise<{ success?: string; error?: string }>;
@@ -24,6 +29,26 @@ function getMessage(params: { success?: string; error?: string }) {
     return 'Enter a service name before saving to the price list.';
   }
 
+  if (params.error === 'service-missing') {
+    return 'That service could not be found for this shop.';
+  }
+
+  if (params.error === 'unknown-product') {
+    return 'One of the selected consumed products is not available for this shop.';
+  }
+
+  if (params.error === 'invalid-quantity') {
+    return 'Consumption quantities must be positive whole numbers.';
+  }
+
+  if (params.success === 'updated') {
+    return 'Service price-list entry updated.';
+  }
+
+  if (params.success === 'consumption-updated') {
+    return 'Service consumption definition saved. No stock moved — it applies to future sales only.';
+  }
+
   if (params.success === 'image-updated') {
     return 'Service image updated. Staff and customers will now see the new visual in the price list.';
   }
@@ -42,7 +67,11 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
   }
 
   const params = await searchParams;
-  const services = await listServices(session.tenant.id);
+  const [services, products, consumptionLinks] = await Promise.all([
+    listServices(session.tenant.id),
+    listProducts(session.tenant.id),
+    listServiceProductLinks(session.tenant.id),
+  ]);
   const feedback = getMessage(params);
 
   return (
@@ -172,6 +201,133 @@ export default async function ServicesPage({ searchParams }: ServicesPageProps) 
                     <div className="hero-actions" style={{ marginTop: 0 }}>
                       <button type="submit" className="button secondary">
                         Save photo
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+
+                {session.user.role !== 'staff' ? (
+                  <form action={updateServiceAction} className="field-grid">
+                    <input type="hidden" name="serviceId" value={service.id} />
+                    <div className="field-row">
+                      <div className="field">
+                        <label htmlFor={`service-name-${service.id}`}>Service name</label>
+                        <input id={`service-name-${service.id}`} name="name" defaultValue={service.name} required />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`service-price-${service.id}`}>Price</label>
+                        <input
+                          id={`service-price-${service.id}`}
+                          name="price"
+                          type="number"
+                          min="0"
+                          step="1"
+                          defaultValue={service.price}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label htmlFor={`service-duration-${service.id}`}>Duration (minutes)</label>
+                        <input
+                          id={`service-duration-${service.id}`}
+                          name="durationMinutes"
+                          type="number"
+                          min="0"
+                          step="1"
+                          defaultValue={service.durationMinutes ?? ''}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`service-active-${service.id}`}>Availability</label>
+                        <select
+                          id={`service-active-${service.id}`}
+                          name="isActive"
+                          defaultValue={service.isActive ? 'true' : 'false'}
+                        >
+                          <option value="true">Active (sellable)</option>
+                          <option value="false">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label htmlFor={`service-commission-type-${service.id}`}>Commission type</label>
+                        <select
+                          id={`service-commission-type-${service.id}`}
+                          name="commissionType"
+                          defaultValue={service.commissionType}
+                        >
+                          <option value="percentage">Percentage</option>
+                          <option value="fixed">Fixed</option>
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`service-commission-value-${service.id}`}>Commission value</label>
+                        <input
+                          id={`service-commission-value-${service.id}`}
+                          name="commissionValue"
+                          type="number"
+                          min="0"
+                          step="1"
+                          defaultValue={service.commissionValue}
+                        />
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`service-description-${service.id}`}>Description</label>
+                      <textarea
+                        id={`service-description-${service.id}`}
+                        name="description"
+                        defaultValue={service.description ?? ''}
+                      />
+                    </div>
+                    <div className="hero-actions" style={{ marginTop: 0 }}>
+                      <button type="submit" className="button secondary">
+                        Save price-list entry
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+
+                {session.user.role !== 'staff' ? (
+                  <form action={setServiceConsumptionAction} className="field-grid">
+                    <input type="hidden" name="serviceId" value={service.id} />
+                    <div className="field">
+                      <span className="eyebrow">Consumed products (definition only — no stock moves until a sale)</span>
+                      {products.length > 0 ? (
+                        <div className="stack">
+                          {products.map((product) => {
+                            const existing = consumptionLinks.find(
+                              (link) => link.serviceId === service.id && link.productId === product.id,
+                            );
+                            return (
+                              <div key={product.id} className="list-row" style={{ borderTop: 0, paddingTop: 4 }}>
+                                <div>
+                                  <strong>{product.name}</strong>
+                                </div>
+                                <input
+                                  name={`bom_${product.id}`}
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  defaultValue={existing?.quantity ?? ''}
+                                  placeholder="0"
+                                  aria-label={`Quantity of ${product.name} consumed per service`}
+                                  style={{ maxWidth: 96 }}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="eyebrow">Add products to the catalog first.</div>
+                      )}
+                    </div>
+                    <div className="hero-actions" style={{ marginTop: 0 }}>
+                      <button type="submit" className="button secondary">
+                        Save consumption
                       </button>
                     </div>
                   </form>
