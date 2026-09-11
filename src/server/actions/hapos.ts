@@ -11,6 +11,7 @@ import { storeImageAsset } from '@/server/assets';
 import { getAccessState } from '@/server/auth/access';
 import { signInCustomerSession, signOutCustomerSession } from '@/server/auth/customer-session';
 import { requireSession, signInSession, signOutSession } from '@/server/auth/demo-session';
+import { buildLoginRateLimitKey, getLoginRateLimiter } from '@/server/auth/rate-limit';
 import {
   SaleValidationError,
   parseExpenseDateInput,
@@ -237,6 +238,14 @@ export async function loginAction(formData: FormData) {
   const username = formString(formData, 'username');
   const password = formString(formData, 'password');
 
+  // Phase 0.9: same per-shop+username throttle as the API login route.
+  if (businessSlug && username) {
+    const decision = getLoginRateLimiter().attempt(buildLoginRateLimitKey(businessSlug, username));
+    if (!decision.allowed) {
+      redirect('/login?error=rate-limited');
+    }
+  }
+
   const auth = await authenticateUser({ businessSlug, username, password });
   if (!auth) {
     redirect('/login?error=invalid');
@@ -258,10 +267,13 @@ export async function loginAction(formData: FormData) {
     });
 
     if (accessState.blocked) {
+      // Phase 0.9: do not leave a usable session behind for blocked tenants.
+      await signOutSession();
       redirect(`/blocked?reason=${accessState.reason}`);
     }
   }
 
+  getLoginRateLimiter().reset(buildLoginRateLimitKey(businessSlug, username));
   redirect(auth.user.role === 'super_admin' ? '/super/tenants' : '/app/dashboard');
 }
 

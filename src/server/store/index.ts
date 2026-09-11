@@ -832,6 +832,12 @@ export async function authenticateUser(input: { businessSlug: string; username: 
   const businessSlugLookup = normalizeLookupValue(input.businessSlug);
   const usernameLookup = normalizeLookupValue(input.username);
 
+  // Phase 0.9 security note: the 'platform' slug is the ONLY super-admin entry
+  // point. It authenticates by username + password hash + isActive, returns NO
+  // tenant, and super_admin sessions are fenced out of every shop route by
+  // requireSession role lists (redirected to /super/tenants). Do not extend
+  // this branch to tenant users, and do not attach commerce capabilities to
+  // super_admin sessions in later phases.
   if (businessSlugLookup === 'platform') {
     const superAdmin = store.users.find(
       (user) => user.role === 'super_admin' && normalizeLookupValue(user.username) === usernameLookup,

@@ -39,7 +39,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
           {params.error ? (
             <p className="pill" style={{ marginTop: 18, background: 'rgba(160, 60, 46, 0.12)', color: 'var(--danger)' }}>
-              Invalid business slug, username, or password.
+              {params.error === 'rate-limited'
+                ? 'Too many login attempts. Wait a few minutes and try again.'
+                : 'Invalid business slug, username, or password.'}
             </p>
           ) : null}
 
