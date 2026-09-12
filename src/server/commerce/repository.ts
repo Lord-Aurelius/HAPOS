@@ -32,6 +32,13 @@ import type { PaymentMethod, PaymentProvider, PaymentStatus } from './payments.t
 
 export type { CreateOrderInput };
 export type { OpContext };
+export type {
+  OpsMovement,
+  OpsOrder,
+  OpsOrderItem,
+  OpsSale,
+  OpsSaleItem,
+} from './commerce-store.ts';
 
 export type OpsPayment = {
   id: string;
@@ -172,10 +179,10 @@ export interface CommerceRepository {
     input: { tenantId: string; saleId: string; actorId: string; actorRole: ActorRole; reason?: string | null },
     ctx?: OpContext,
   ): Promise<{ sale: OpsSale; reversals: OpsMovement[] }>;
-  amendLinkedSale(
+  amendSale(
     input: {
       tenantId: string;
-      legacyRecordId: string;
+      saleId: string;
       corrected: {
         price: number;
         serviceId: string | null;
@@ -214,8 +221,54 @@ export interface CommerceRepository {
   transitionPayment(input: TransitionPaymentInput, ctx?: OpContext): Promise<{ payment: OpsPayment; duplicate: boolean }>;
   getPaymentByIdempotency(tenantId: string, key: string): Promise<OpsPayment | null>;
   getPaymentByProviderRequest(tenantId: string, providerRequestId: string): Promise<OpsPayment | null>;
+  /**
+   * Exceptional lookup for provider callbacks, which correlate by request id
+   * before the tenant is known. Callers must verify authenticity first and
+   * scope everything else to the returned row's tenant.
+   */
+  getPaymentByProviderRequestGlobal(providerRequestId: string): Promise<OpsPayment | null>;
+  /**
+   * Exceptional lookup for provider callbacks (correlated by ?pid= before
+   * signature verification scopes everything to the row's tenant).
+   */
+  getPaymentByIdGlobal(paymentId: string): Promise<OpsPayment | null>;
+  updatePaymentProviderDetails(
+    input: { tenantId: string; paymentId: string; providerRequestId?: string | null; providerReference?: string | null; expiresAt?: string | null },
+    ctx?: OpContext,
+  ): Promise<OpsPayment>;
+  /**
+   * Atomic paid-order completion: order APPROVED (if needed) + sale
+   * finalized with stock + payment linked. On stock failure the payment is
+   * flagged needs_recovery and the outcome reports it (never partial).
+   */
+  completePaidOrder(
+    input: { tenantId: string; orderId: string; paymentId: string; actorId: string },
+    ctx?: OpContext,
+  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment; outcome: 'completed' | 'needs-recovery' }>;
+  /** Retry completion for a SUCCESS payment flagged needs_recovery. */
+  recoverPaidOrder(
+    input: { tenantId: string; paymentId: string; actorId: string },
+    ctx?: OpContext,
+  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment }>;
   getPaymentsByOrder(tenantId: string, orderId: string): Promise<OpsPayment[]>;
   markPaymentRecovery(tenantId: string, paymentId: string, reason: string, ctx?: OpContext): Promise<OpsPayment>;
+  /**
+   * Atomic paid-order completion: order APPROVED (if needed) + sale
+   * finalized with stock + payment linked. On stock failure the payment is
+   * flagged needs_recovery and the outcome reports it (never partial).
+   */
+  completePaidOrder(
+    input: { tenantId: string; orderId: string; paymentId: string; actorId: string },
+    ctx?: OpContext,
+  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment; outcome: 'completed' | 'needs-recovery' }>;
+  /** Retry completion for a SUCCESS payment flagged needs_recovery. */
+  recoverPaidOrder(
+    input: { tenantId: string; paymentId: string; actorId: string },
+    ctx?: OpContext,
+  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment }>;
+  // ── credentials / reads ──
+  verifySellerCredential(tenantId: string, reference: unknown, bearer: unknown, ctx?: OpContext): Promise<OpsSellerContext>;
+  touchSellerCredentialUsed(tenantId: string, credentialId: string, ctx?: OpContext): Promise<void>;
 
   // ── credentials / reads ──
   verifySellerCredential(tenantId: string, reference: unknown, bearer: unknown, ctx?: OpContext): Promise<OpsSellerContext>;

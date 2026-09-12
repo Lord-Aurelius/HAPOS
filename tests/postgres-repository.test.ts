@@ -180,6 +180,99 @@ describe('PostgresCommerceRepository', { skip: !DATABASE_URL }, () => {
     assert.equal(foreign, null);
   });
 
+  it('completes paid orders atomically and flags stock failures for recovery', async () => {
+    const created = await repo.createOrder({
+      tenantId, customerId, sellerId: staffId, source: 'STAFF',
+      lines: [{ kind: 'product', refId: productId, quantity: 1 }],
+      creatorRole: 'staff', creatorId: staffId, orderReviewRequired: false,
+    });
+    await repo.submitOrder({ tenantId, orderId: created.order.id, actorId: staffId, actorRole: 'staff', orderReviewRequired: false });
+    const payment = await repo.createPayment({
+      tenantId, orderId: created.order.id, provider: 'PAYMENTOS', method: 'MPESA',
+      amount: created.order.total, currencyCode: 'KES', customerPhone: '+254712345678',
+      idempotencyKey: `pay-complete-${RUN}`, attemptNumber: 1,
+    });
+    await repo.transitionPayment({ tenantId, paymentId: payment.payment.id, to: 'SUCCESS', providerReference: 'R1' });
+    const completed = await repo.completePaidOrder({
+      tenantId, orderId: created.order.id, paymentId: payment.payment.id, actorId: 'system',
+    });
+    assert.equal(completed.outcome, 'completed');
+    assert.equal(completed.sale.status, 'COMPLETED');
+    const linked = await repo.getPaymentByIdempotency(tenantId, `pay-complete-${RUN}`);
+    assert.equal(linked?.saleId, completed.sale.id);
+
+    // Stock-out at completion time becomes needs-recovery, never partial.
+    await pool.query(`update products set quantity_on_hand = 0 where id = $1`, [productId]);
+    const created2 = await repo.createOrder({
+      tenantId, customerId: null, sellerId: staffId, source: 'STAFF',
+      lines: [{ kind: 'product', refId: productId, quantity: 1 }],
+      creatorRole: 'staff', creatorId: staffId, orderReviewRequired: true,
+    });
+    // Bypass submit approval gate: approve directly as admin, then drain below.
+    await repo.submitOrder({ tenantId, orderId: created2.order.id, actorId: staffId, actorRole: 'staff', orderReviewRequired: true });
+    const payment2 = await repo.createPayment({
+      tenantId, orderId: created2.order.id, provider: 'PAYMENTOS', method: 'MPESA',
+      amount: created2.order.total, currencyCode: 'KES', customerPhone: '+254712345678',
+      idempotencyKey: `pay-complete2-${RUN}`, attemptNumber: 1,
+    });
+    await repo.transitionPayment({ tenantId, paymentId: payment2.payment.id, to: 'SUCCESS' });
+    // Restock then drain to force the race shape deterministically.
+    await pool.query(`update products set quantity_on_hand = 1 where id = $1`, [productId]);
+    await pool.query(`update products set quantity_on_hand = 0 where id = $1`, [productId]);
+    const flagged = await repo.completePaidOrder({
+      tenantId, orderId: created2.order.id, paymentId: payment2.payment.id, actorId: 'system',
+    });
+    assert.equal(flagged.outcome, 'needs-recovery');
+    const recovery = await repo.listPayments(tenantId, { needsRecovery: true });
+    assert.ok(recovery.some((p) => p.id === payment2.payment.id));
+
+    // Restock and recover to completion.
+    await pool.query(`update products set quantity_on_hand = 5 where id = $1`, [productId]);
+    const recovered = await repo.recoverPaidOrder({ tenantId, paymentId: payment2.payment.id, actorId: adminId });
+    assert.equal(recovered.sale.status, 'COMPLETED');
+    const cleared = await repo.getPaymentByIdempotency(tenantId, `pay-complete2-${RUN}`);
+    assert.equal(cleared?.needsRecovery, false);
+  });
+
+  it('amends engine sales with audit rows', async () => {
+    const created = await repo.createOrder({
+      tenantId, customerId: null, sellerId: staffId, source: 'STAFF',
+      lines: [{ kind: 'service', refId: serviceId, quantity: 1 }],
+      creatorRole: 'staff', creatorId: staffId, orderReviewRequired: true,
+    });
+    await repo.submitOrder({ tenantId, orderId: created.order.id, actorId: staffId, actorRole: 'staff', orderReviewRequired: true });
+    const approved = await repo.approveOrder({ tenantId, orderId: created.order.id, actorId: adminId, actorRole: 'shop_admin' });
+    const amended = await repo.amendSale({
+      tenantId,
+      saleId: approved.sale.id,
+      corrected: { price: 200, serviceId, serviceName: 'SQL Cut', commissionType: 'percentage', commissionValue: 10, commissionAmount: 20 },
+      actorId: adminId,
+      reason: 'test amendment',
+    });
+    assert.equal(amended.amended, true);
+    assert.equal(amended.sale?.total, 200);
+  });
+
+  it('updates provider details and resolves callbacks globally', async () => {
+    const created = await repo.createOrder({
+      tenantId, customerId: null, sellerId: staffId, source: 'STAFF',
+      lines: [{ kind: 'service', refId: serviceId, quantity: 1 }],
+      creatorRole: 'staff', creatorId: staffId, orderReviewRequired: true,
+    });
+    const payment = await repo.createPayment({
+      tenantId, orderId: created.order.id, provider: 'PAYMENTOS', method: 'MPESA',
+      amount: created.order.total, currencyCode: 'KES', customerPhone: '+254712345678',
+      idempotencyKey: `pay-prov-${RUN}`, attemptNumber: 1,
+    });
+    const updated = await repo.updatePaymentProviderDetails({
+      tenantId, paymentId: payment.payment.id, providerRequestId: 'req-global-1', providerReference: 'REFG1',
+    });
+    assert.equal(updated.providerRequestId, 'req-global-1');
+    const located = await repo.getPaymentByProviderRequestGlobal('req-global-1');
+    assert.equal(located?.id, payment.payment.id);
+    assert.equal(located?.tenantId, tenantId);
+  });
+
   it('verifies seller credentials against hashes', async () => {
     const { hashSellerBearer } = await import('../src/server/commerce/seller.ts');
     const { randomUUID } = await import('node:crypto');

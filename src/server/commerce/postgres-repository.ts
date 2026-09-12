@@ -30,6 +30,7 @@ import {
   type OrderSource,
 } from './orders.ts';
 import {
+  InventoryError,
   applyMovement,
   planAdjustment,
   resolveServiceConsumption,
@@ -466,7 +467,7 @@ export class PostgresCommerceRepository implements CommerceRepository {
     client: PoolClient,
     tenantId: string,
     order: OpsOrder,
-    actorId: string,
+    actorId: string | null,
     ctx: OpContext,
     now: string,
   ): Promise<{ order: OpsOrder; sale: OpsSale }> {
@@ -581,7 +582,7 @@ export class PostgresCommerceRepository implements CommerceRepository {
     quantity: number,
     type: InventoryMovementType,
     referenceId: string,
-    actorId: string,
+    actorId: string | null,
     now: string,
     ctx: OpContext,
     referenceType = 'sale',
@@ -716,7 +717,7 @@ export class PostgresCommerceRepository implements CommerceRepository {
     productId: string,
     quantity: number,
     type: InventoryMovementType,
-    actorId: string,
+    actorId: string | null,
     now: string,
     ctx: OpContext,
   ): Promise<OpsMovement> {
@@ -1002,9 +1003,234 @@ export class PostgresCommerceRepository implements CommerceRepository {
     return row ? mapPaymentRow(row) : null;
   }
 
+  async getPaymentByIdGlobal(paymentId: string) {
+    const { rows } = await this.pool.query(`select * from payments where id = $1`, [paymentId]);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? mapPaymentRow(row) : null;
+  }
+
+  async updatePaymentProviderDetails(
+    input: { tenantId: string; paymentId: string; providerRequestId?: string | null; providerReference?: string | null; expiresAt?: string | null },
+    ctx: OpContext = {},
+  ) {
+    const { rows } = await this.pool.query(
+      `update payments set provider_request_id = coalesce($3, provider_request_id), provider_reference = coalesce($4, provider_reference), expires_at = coalesce($5, expires_at), updated_at = $6
+       where tenant_id = $1 and id = $2 returning *`,
+      [input.tenantId, input.paymentId, input.providerRequestId ?? null, input.providerReference ?? null, input.expiresAt ?? null, nowISO(ctx)],
+    );
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new PaymentError('unknown-payment', 'Payment not found for this shop.');
+    }
+    return mapPaymentRow(row);
+  }
+
+  async completePaidOrder(
+    input: { tenantId: string; orderId: string; paymentId: string; actorId: string },
+    ctx: OpContext = {},
+  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment; outcome: 'completed' | 'needs-recovery' }> {
+    try {
+      return await withTransaction(this.pool, async (client) => {
+        const payment = await client.query(`select * from payments where tenant_id = $1 and id = $2 for update`, [input.tenantId, input.paymentId]);
+        const paymentRow = payment.rows[0] as Record<string, unknown> | undefined;
+        if (!paymentRow) {
+          throw new PaymentError('unknown-payment', 'Payment not found for this shop.');
+        }
+        if (paymentRow.status !== 'SUCCESS') {
+          throw new CommerceError('invalid-transition', 'Payment is not confirmed.');
+        }
+        // System settlement has no users row: approved_by/recorded_by stay
+        // NULL (the payment row + timestamps carry the audit trail). The file
+        // adapter records the literal 'system' string instead (no FK there).
+        // Guard the lookup: non-uuid actor ids (e.g. 'system') skip the query.
+        let actorOrNull: string | null = null;
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.actorId)) {
+          const actorUser = await client.query(`select id from users where tenant_id = $1 and id = $2`, [input.tenantId, input.actorId]);
+          actorOrNull = actorUser.rowCount ? input.actorId : null;
+        }
+        const locked = await client.query(`select * from orders where tenant_id = $1 and id = $2 for update`, [input.tenantId, input.orderId]);
+        const orderRow = locked.rows[0] as Record<string, unknown> | undefined;
+        if (!orderRow) {
+          throw new CommerceError('unknown-item', 'Order not found for this shop.');
+        }
+        const now = nowISO(ctx);
+        const order = mapOrderRow(orderRow);
+        if (order.status === 'PENDING_REVIEW' || order.status === 'SUBMITTED') {
+          order.status = transitionOrderStatus(order.status, 'APPROVED');
+          await client.query(`update orders set status = 'APPROVED', approved_at = $3, approved_by = $4, updated_at = $3 where tenant_id = $1 and id = $2`, [
+            input.tenantId, input.orderId, now, actorOrNull,
+          ]);
+          order.approvedAt = now;
+          order.approvedBy = actorOrNull;
+        }
+        const finalized = await this.finalizeLockedOrder(client, input.tenantId, order, actorOrNull, ctx, now);
+        await client.query(`update payments set sale_id = $3, needs_recovery = false, recovery_reason = null, updated_at = $4 where tenant_id = $1 and id = $2`, [
+          input.tenantId, input.paymentId, finalized.sale.id, now,
+        ]);
+        const refreshed = await client.query(`select * from payments where tenant_id = $1 and id = $2`, [input.tenantId, input.paymentId]);
+        return {
+          order: finalized.order,
+          sale: finalized.sale,
+          payment: mapPaymentRow(refreshed.rows[0] as Record<string, unknown>),
+          outcome: 'completed' as const,
+        };
+      });
+    } catch (error) {
+      if (error instanceof CommerceError && error.code === 'insufficient-stock') {
+        await this.pool.query(`update payments set needs_recovery = true, recovery_reason = $3, updated_at = $4 where tenant_id = $1 and id = $2`, [
+          input.tenantId, input.paymentId, `Stock unavailable at finalization for order ${input.orderId}.`, nowISO(ctx),
+        ]);
+        const order = await this.getOrderWithItems(input.tenantId, input.orderId);
+        const payment = await this.pool.query(`select * from payments where tenant_id = $1 and id = $2`, [input.tenantId, input.paymentId]);
+        const sale = await this.pool.query(`select * from sales where tenant_id = $1 and order_id = $2`, [input.tenantId, input.orderId]);
+        const saleRow = sale.rows[0] as Record<string, unknown> | undefined;
+        return {
+          order: order?.order as OpsOrder,
+          sale: (saleRow ? mapSaleRow(saleRow) : null) as unknown as OpsSale,
+          payment: mapPaymentRow(payment.rows[0] as Record<string, unknown>),
+          outcome: 'needs-recovery' as const,
+        };
+      }
+      throw error;
+    }
+  }
+
+  async recoverPaidOrder(
+    input: { tenantId: string; paymentId: string; actorId: string },
+    ctx: OpContext = {},
+  ) {
+    const { rows } = await this.pool.query(`select * from payments where tenant_id = $1 and id = $2`, [input.tenantId, input.paymentId]);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new PaymentError('unknown-payment', 'Payment not found for this shop.');
+    }
+    if (row.status !== 'SUCCESS' || !row.needs_recovery) {
+      throw new CommerceError('invalid-transition', 'That payment does not need recovery.');
+    }
+    if (!row.order_id) {
+      throw new CommerceError('unknown-item', 'Recoverable payment has no order.');
+    }
+    const completed = await this.completePaidOrder(
+      { tenantId: input.tenantId, orderId: row.order_id as string, paymentId: input.paymentId, actorId: input.actorId },
+      ctx,
+    );
+    if (completed.outcome !== 'completed') {
+      throw new CommerceError('insufficient-stock', 'Stock is still unavailable. The payment remains flagged for recovery.');
+    }
+    return { order: completed.order, sale: completed.sale, payment: completed.payment };
+  }
+
+  async amendSale(
+    input: {
+      tenantId: string;
+      saleId: string;
+      corrected: {
+        price: number;
+        serviceId: string | null;
+        serviceName: string;
+        commissionType: 'fixed' | 'percentage';
+        commissionValue: number;
+        commissionAmount: number;
+      };
+      actorId: string;
+      reason?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    const reason = (input.reason ?? '').trim();
+    if (!reason) {
+      throw new CommerceError('amendment-reason-required', 'Corrections to linked sales need a reason.');
+    }
+    return withTransaction(this.pool, async (client) => {
+      const locked = await client.query(`select * from sales where tenant_id = $1 and id = $2 for update`, [input.tenantId, input.saleId]);
+      const saleRow = locked.rows[0] as Record<string, unknown> | undefined;
+      if (!saleRow) {
+        throw new CommerceError('unknown-item', 'Sale not found for this shop.');
+      }
+      const sale = mapSaleRow(saleRow);
+      if (sale.status !== 'COMPLETED') {
+        throw new CommerceError('invalid-transition', 'Only completed sales can be amended.');
+      }
+      const itemRows = await client.query(`select * from sale_items where tenant_id = $1 and sale_id = $2`, [input.tenantId, input.saleId]);
+      const items = itemRows.rows.map(mapSaleItemRow);
+      if (items.length !== 1 || items[0].itemType !== 'SERVICE') {
+        throw new CommerceError('invalid-transition', 'That engine sale has unexpected lines for amendment.');
+      }
+      const item = items[0];
+      const now = nowISO(ctx);
+      const fieldChanges: { field: string; previous: unknown; current: unknown }[] = [];
+      const track = (field: string, previous: unknown, current: unknown) => {
+        if (JSON.stringify(previous) !== JSON.stringify(current)) {
+          fieldChanges.push({ field, previous, current });
+        }
+      };
+      const previousTotal = sale.total;
+      track('actualUnitPrice', item.actualUnitPrice, input.corrected.price);
+      track('commissionAmount', item.commissionAmount, input.corrected.commissionAmount);
+
+      let stockSynced = false;
+      if ((item.serviceId ?? null) !== (input.corrected.serviceId ?? null)) {
+        const links = (
+          await client.query(`select service_id, product_id, quantity from service_product_links where tenant_id = $1`, [input.tenantId])
+        ).rows.map((row) => ({
+          serviceId: (row as Record<string, unknown>).service_id as string,
+          tenantId: input.tenantId,
+          productId: (row as Record<string, unknown>).product_id as string,
+          quantity: Number((row as Record<string, unknown>).quantity),
+        }));
+        const consumed = ((item.itemSnapshot ?? {}) as Record<string, unknown>).consumedProducts as { productId: string; quantity: number }[] | undefined ?? [];
+        const fresh = resolveServiceConsumption(links, input.tenantId, input.corrected.serviceId ?? '', item.quantity);
+        for (const line of fresh) {
+          const balance = await client.query(`select quantity_on_hand from products where tenant_id = $1 and id = $2`, [input.tenantId, line.productId]);
+          const onHand = Number((balance.rows[0] as Record<string, unknown> | undefined)?.quantity_on_hand ?? 0);
+          if (!(balance.rows[0] && (ctx.allowNegative || onHand - line.quantity >= 0))) {
+            throw new CommerceError('insufficient-stock', 'Insufficient stock to restate this sale to the new service. Nothing was changed.');
+          }
+        }
+        track('serviceId', item.serviceId, input.corrected.serviceId);
+        for (const line of consumed) {
+          await this.applyMovement(client, input.tenantId, line.productId, line.quantity, 'ADJUSTMENT', input.saleId, input.actorId, now, ctx, 'sale_correction', `Correction restatement for sale ${input.saleId}`);
+        }
+        for (const line of fresh) {
+          await this.applyMovement(client, input.tenantId, line.productId, -line.quantity, 'SERVICE_CONSUMPTION', input.saleId, input.actorId, now, ctx, 'sale_correction');
+        }
+        await client.query(`update sale_items set service_id = $3, item_name = $4, item_snapshot = $5 where tenant_id = $1 and id = $2`, [
+          input.tenantId, item.id, input.corrected.serviceId, input.corrected.serviceName,
+          JSON.stringify({ ...((item.itemSnapshot ?? {}) as Record<string, unknown>), consumedProducts: fresh }),
+        ]);
+        stockSynced = true;
+      }
+
+      await client.query(
+        `update sale_items set actual_unit_price = $3, line_total = $4, commission_type = $5, commission_value = $6, commission_amount = $7 where tenant_id = $1 and id = $2`,
+        [input.tenantId, item.id, input.corrected.price, input.corrected.price * item.quantity, input.corrected.commissionType, input.corrected.commissionValue, input.corrected.commissionAmount],
+      );
+      const newTotal = input.corrected.price * item.quantity;
+      await client.query(`update sales set subtotal = $3, total = $3, updated_at = $4 where tenant_id = $1 and id = $2`, [
+        input.tenantId, input.saleId, newTotal, now,
+      ]);
+      track('total', previousTotal, newTotal);
+      await client.query(
+        `insert into sale_amendments (id, tenant_id, sale_id, previous_total, new_total, field_changes, reason, actor_id, created_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [newId(ctx), input.tenantId, input.saleId, previousTotal, newTotal, JSON.stringify(fieldChanges), reason, input.actorId, now],
+      );
+      const refreshed = await this.readSale(client, input.tenantId, input.saleId);
+      return { amended: true, sale: refreshed.sale, stockSynced };
+    });
+  }
+
   async getPaymentByProviderRequest(tenantId: string, providerRequestId: string) {
     const { rows } = await this.pool.query(`select * from payments where tenant_id = $1 and provider_request_id = $2 order by created_at desc limit 1`, [
       tenantId, providerRequestId,
+    ]);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? mapPaymentRow(row) : null;
+  }
+
+  async getPaymentByProviderRequestGlobal(providerRequestId: string) {
+    const { rows } = await this.pool.query(`select * from payments where provider_request_id = $1 order by created_at desc limit 1`, [
+      providerRequestId,
     ]);
     const row = rows[0] as Record<string, unknown> | undefined;
     return row ? mapPaymentRow(row) : null;

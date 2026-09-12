@@ -480,7 +480,9 @@ export function approveOrder(
   input: { tenantId: string; orderId: string; actorId: string; actorRole: ActorRole },
   ctx: OpContext = {},
 ): { order: OpsOrder; sale: OpsSale; duplicate: boolean } {
-  if (input.actorRole !== 'shop_admin' && input.actorRole !== 'super_admin') {
+  // 'system' is the provider-confirmed settlement actor (Phase 4 callbacks),
+  // never an interactive user. Staff remain rejected below.
+  if (input.actorRole !== 'shop_admin' && input.actorRole !== 'super_admin' && input.actorRole !== 'system') {
     throw new CommerceError('not-permitted', 'Only admins can approve orders.');
   }
 

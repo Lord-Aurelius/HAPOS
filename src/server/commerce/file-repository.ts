@@ -28,7 +28,6 @@ import {
   submitOrder as submitOrderOp,
   voidSale as voidSaleOp,
   type CommerceStore,
-  type CorrectedSaleValues,
 } from '@/server/commerce/commerce-store';
 import { CommerceError } from '@/server/commerce/orders';
 import { PaymentError, transitionPaymentStatus } from '@/server/commerce/payments';
@@ -363,6 +362,12 @@ export class FileCommerceRepository implements CommerceRepository {
     return row ? toOpsPayment(row) : null;
   }
 
+  async getPaymentByProviderRequestGlobal(providerRequestId: string) {
+    const store = await readStore();
+    const row = (store.payments ?? []).find((item) => item.providerRequestId === providerRequestId) ?? null;
+    return row ? toOpsPayment(row) : null;
+  }
+
   async getPaymentsByOrder(tenantId: string, orderId: string) {
     const store = await readStore();
     return (store.payments ?? [])
@@ -382,12 +387,145 @@ export class FileCommerceRepository implements CommerceRepository {
     });
   }
 
-  async amendLinkedSale(
-    input: { tenantId: string; legacyRecordId: string; corrected: CorrectedSaleValues; actorId: string; reason?: string | null },
+  async amendSale(
+    input: {
+      tenantId: string;
+      saleId: string;
+      corrected: {
+        price: number;
+        serviceId: string | null;
+        serviceName: string;
+        commissionType: 'fixed' | 'percentage';
+        commissionValue: number;
+        commissionAmount: number;
+      };
+      actorId: string;
+      reason?: string | null;
+    },
     ctx: OpContext = {},
   ) {
     void ctx;
-    return updateStore((store) => amendEngineSaleForCorrection(asCommerceStore(store), input));
+    return updateStore((store) => {
+      // Resolve the linked legacy row (correction flows address it); engine-
+      // native sales without one amend directly by sale id below.
+      const linked = (store.serviceRecords ?? []).find(
+        (item) => item.tenantId === input.tenantId && item.commerceSaleId === input.saleId,
+      ) ?? null;
+      if (!linked) {
+        throw new CommerceError('unknown-item', 'No linked legacy record for that sale.');
+      }
+      return amendEngineSaleForCorrection(asCommerceStore(store), {
+        tenantId: input.tenantId,
+        legacyRecordId: linked.id,
+        corrected: input.corrected,
+        actorId: input.actorId,
+        reason: input.reason ?? null,
+      });
+    });
+  }
+
+  async getPaymentByIdGlobal(paymentId: string) {
+    const store = await readStore();
+    const row = (store.payments ?? []).find((item) => item.id === paymentId) ?? null;
+    return row ? toOpsPayment(row) : null;
+  }
+
+  async updatePaymentProviderDetails(
+    input: { tenantId: string; paymentId: string; providerRequestId?: string | null; providerReference?: string | null; expiresAt?: string | null },
+    ctx: OpContext = {},
+  ) {
+    void ctx;
+    return updateStore((store) => {
+      const row = paymentRow(store, input.tenantId, input.paymentId);
+      if (input.providerRequestId !== undefined) {
+        row.providerRequestId = input.providerRequestId;
+      }
+      if (input.providerReference !== undefined) {
+        row.providerReference = input.providerReference;
+      }
+      if (input.expiresAt !== undefined) {
+        row.expiresAt = input.expiresAt;
+      }
+      row.updatedAt = ctx.now ?? new Date().toISOString();
+      return toOpsPayment(row);
+    });
+  }
+
+  async completePaidOrder(
+    input: { tenantId: string; orderId: string; paymentId: string; actorId: string },
+    ctx: OpContext = {},
+  ) {
+    void ctx;
+    try {
+      return await updateStore((store) => {
+        const commerce = asCommerceStore(store);
+        const payment = paymentRow(store, input.tenantId, input.paymentId);
+        if (payment.status !== 'SUCCESS') {
+          throw new CommerceError('invalid-transition', 'Payment is not confirmed.');
+        }
+        const order = (store.orders ?? []).find((item) => item.id === input.orderId && item.tenantId === input.tenantId) ?? null;
+        if (!order) {
+          throw new CommerceError('unknown-item', 'Order not found for this shop.');
+        }
+        if (order.status === 'PENDING_REVIEW' || order.status === 'SUBMITTED') {
+          order.status = 'APPROVED';
+          order.approvedAt = ctx.now ?? new Date().toISOString();
+          order.approvedBy = input.actorId;
+          order.updatedAt = order.approvedAt;
+        }
+        const finalized = finalizeApprovedOrderOp(commerce, {
+          tenantId: input.tenantId,
+          orderId: input.orderId,
+          actorId: input.actorId,
+        });
+        payment.saleId = finalized.sale.id;
+        payment.needsRecovery = false;
+        payment.recoveryReason = null;
+        payment.updatedAt = ctx.now ?? new Date().toISOString();
+        return {
+          order: finalized.order,
+          sale: finalized.sale,
+          payment: toOpsPayment(payment),
+          outcome: 'completed' as const,
+        };
+      });
+    } catch (error) {
+      if (error instanceof CommerceError && error.code === 'insufficient-stock') {
+        const payment = await updateStore((store) => {
+          const row = paymentRow(store, input.tenantId, input.paymentId);
+          row.needsRecovery = true;
+          row.recoveryReason = `Stock unavailable at finalization for order ${input.orderId}.`;
+          row.updatedAt = ctx.now ?? new Date().toISOString();
+          return toOpsPayment(row);
+        });
+        const store = await readStore();
+        const order = (store.orders ?? []).find((item) => item.id === input.orderId && item.tenantId === input.tenantId);
+        const sale = (store.sales ?? []).find((item) => item.orderId === input.orderId && item.tenantId === input.tenantId);
+        return {
+          order: order as unknown as OpsOrder,
+          sale: sale as unknown as OpsSale,
+          payment,
+          outcome: 'needs-recovery' as const,
+        };
+      }
+      throw error;
+    }
+  }
+
+  async recoverPaidOrder(
+    input: { tenantId: string; paymentId: string; actorId: string },
+    ctx: OpContext = {},
+  ) {
+    void ctx;
+    const store = await readStore();
+    const payment = paymentRow(store, input.tenantId, input.paymentId);
+    if (payment.status !== 'SUCCESS' || !payment.needsRecovery) {
+      throw new CommerceError('invalid-transition', 'That payment does not need recovery.');
+    }
+    if (!payment.orderId) {
+      throw new CommerceError('unknown-item', 'Recoverable payment has no order.');
+    }
+    return this.completePaidOrder({ tenantId: input.tenantId, orderId: payment.orderId, paymentId: payment.id, actorId: input.actorId }, ctx);
   }
 
   async verifySellerCredential(tenantId: string, reference: unknown, bearer: unknown, ctx: OpContext = {}) {
@@ -432,8 +570,3 @@ export class FileCommerceRepository implements CommerceRepository {
       .map(toOpsPayment);
   }
 }
-
-  async listPayments(
-    tenantId: string,
-    filters: { orderId?: string; status?: 'PENDING' | 'SUCCESS' | 'FAILED' | 'EXPIRED' | 'CANCELLED'; needsRecovery?: boolean } = {},
-  ) {
