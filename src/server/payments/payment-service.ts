@@ -13,11 +13,11 @@
  * App-only module (imports the gateway + repository selector).
  */
 
-import { PaymentError, assertConfirmationAmount, assertInitiationAmount, buildPaymentIdempotencyKey } from '@/server/commerce/payments';
-import type { CommerceRepository, OpsPayment } from '@/server/commerce/repository';
-import { GatewayError, type PaymentGateway } from '@/server/payments/gateway';
-import { MockPaymentProvider } from '@/server/payments/mock-provider';
-import { PaymentOSAdapter } from '@/server/payments/paymentos';
+import { PaymentError, assertConfirmationAmount, assertInitiationAmount, buildPaymentIdempotencyKey } from '../commerce/payments.ts';
+import type { CommerceRepository, OpsPayment } from '../commerce/repository.ts';
+import { GatewayError, type PaymentGateway } from './gateway.ts';
+import { MockPaymentProvider } from './mock-provider.ts';
+import { PaymentOSAdapter } from './paymentos.ts';
 
 export type PaymentServiceError = PaymentError | GatewayError;
 

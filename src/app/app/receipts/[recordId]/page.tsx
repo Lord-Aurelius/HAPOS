@@ -5,6 +5,7 @@ import { BusinessPrintHeader } from '@/components/tenant/business-print-header';
 import { PrintButton } from '@/components/ui/print-button';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { requireSession } from '@/server/auth/demo-session';
+import { getCommerceRepository } from '@/server/commerce/repository-select';
 import { listAllCustomers, listServiceRecords } from '@/server/services/app-data';
 
 type ReceiptPageProps = {
@@ -34,6 +35,29 @@ export default async function ReceiptPage({ params }: ReceiptPageProps) {
   }
 
   const customer = customers.find((item) => item.id === record.customerId) ?? null;
+
+  // Phase 4: show the linked engine payment (if any) — never a fake success.
+  let paymentPanel: { method: string; status: string; reference: string | null; customerPhone: string | null; saleTotal: number | null } | null = null;
+  const linkedSaleId = (record as unknown as { commerceSaleId?: string | null }).commerceSaleId ?? null;
+  if (linkedSaleId) {
+    try {
+      const repo = getCommerceRepository();
+      const sale = await repo.getSaleView(tenant.id, linkedSaleId);
+      if (sale) {
+        const payments = await repo.listPayments(tenant.id, { orderId: sale.orderId });
+        const latest = payments[0] ?? null;
+        paymentPanel = {
+          method: sale.paymentMethod ?? 'CASH',
+          status: latest?.status ?? (sale.status === 'COMPLETED' ? 'paid via engine' : 'no payment record'),
+          reference: latest?.providerReference ?? null,
+          customerPhone: latest?.customerPhone ?? null,
+          saleTotal: sale.total,
+        };
+      }
+    } catch {
+      // Receipt never fails because payment lookup failed.
+    }
+  }
 
   return (
     <>
@@ -78,6 +102,27 @@ export default async function ReceiptPage({ params }: ReceiptPageProps) {
             <strong>{formatCurrency(record.price, tenant.currencyCode)}</strong>
             <div className="eyebrow">Commission: {formatCurrency(record.commission, tenant.currencyCode)}</div>
           </div>
+          {paymentPanel ? (
+            <div className="receipt-card">
+              <span className="tile-label">Payment</span>
+              <strong>
+                {paymentPanel.method} · {paymentPanel.status}
+              </strong>
+              <div className="eyebrow">
+                {paymentPanel.reference ? `Ref ${paymentPanel.reference}` : 'No provider reference'}
+                {paymentPanel.customerPhone ? ` · ${paymentPanel.customerPhone}` : ''}
+              </div>
+              {paymentPanel.saleTotal !== null && paymentPanel.saleTotal !== record.price ? (
+                <div className="eyebrow">Engine total {formatCurrency(paymentPanel.saleTotal, tenant.currencyCode)} (may differ for mixed carts)</div>
+              ) : null}
+              {paymentPanel.status === 'PENDING' ? (
+                <div className="eyebrow">Payment pending — not yet confirmed by the provider.</div>
+              ) : null}
+              {paymentPanel.status === 'FAILED' || paymentPanel.status === 'EXPIRED' ? (
+                <div className="eyebrow">Payment did not succeed — this receipt reflects the service ledger only.</div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="grid-two" style={{ marginTop: 20 }}>

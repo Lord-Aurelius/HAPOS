@@ -1,10 +1,9 @@
 import { formatCurrency } from '@/lib/format';
 import { SellerError } from '@/server/commerce/seller';
 import { checkSellerRateLimit } from '@/server/auth/seller-limit';
-import { getSellerQrContext, submitSellerQrOrderAction } from '@/server/actions/seller';
+import { getSellerQrContext, retrySellerQrPaymentAction, submitSellerQrOrderAction } from '@/server/actions/seller';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
-import { getCatalog } from '@/server/services/app-data';
-import { readStore } from '@/server/store';
+import { getCommerceRepository } from '@/server/commerce/repository-select';
 
 type SellPageProps = {
   params: Promise<{ reference: string }>;
@@ -28,6 +27,9 @@ function getErrorMessage(error?: string) {
     'insufficient-stock': 'Insufficient stock — the sale was blocked and nothing was deducted.',
     'rate-limited': 'Too many attempts. Wait a few minutes and try again.',
     'invalid-phone': 'Enter a valid Kenyan M-Pesa number (e.g. 0712345678).',
+    'gateway-unconfigured': 'Payment provider is not configured. Cash works; M-Pesa needs staging setup.',
+    'gateway-rejected': 'Payment provider rejected the request. Try again.',
+    'gateway-timeout': 'Payment provider did not respond. Try again.',
   };
   return (error && messages[error]) || null;
 }
@@ -48,32 +50,37 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
     }
   }
 
-  const catalog = context ? await getCatalog(context.tenantId) : [];
-  const store = context ? await readStore() : null;
-
-  // Receipt: tenant- and seller-scoped read of the just-created order/sale.
+  const repo = context ? getCommerceRepository() : null;
+  const catalog = context && repo ? await repo.getCatalogProducts(context.tenantId).then(async (products) => {
+    const services = await repo.getCatalogServices(context!.tenantId);
+    return [
+      ...products.filter((p) => p.isActive).map((p) => ({ id: p.id, type: 'product' as const, name: p.name, catalogPrice: p.sellingPrice, isActive: p.isActive })),
+      ...services.filter((s) => s.isActive).map((s) => ({ id: s.id, type: 'service' as const, name: s.name, catalogPrice: s.price, isActive: s.isActive })),
+    ];
+  }) : [];
+  // Receipt: repository-scoped (works in file and SQL modes).
   let receipt: {
     orderTotal: number;
     orderStatus: string;
     paymentMethod: string | null;
     customerPhone: string | null;
+    paymentStatus: string | null;
     saleTotal: number | null;
     lines: { name: string; quantity: number; lineTotal: number }[];
   } | null = null;
-  if (context && store && query.orderId) {
-    const order = (store.orders ?? []).find(
-      (item) => item.id === query.orderId && item.tenantId === context!.tenantId && item.sellerId === context!.sellerId,
-    );
-    if (order) {
-      const items = (store.orderItems ?? []).filter((item) => item.orderId === order.id);
-      const sale = query.saleId
-        ? (store.sales ?? []).find((item) => item.id === query.saleId && item.tenantId === context!.tenantId)
-        : null;
+  if (context && query.orderId && repo) {
+    const order = await repo.getOrderView(context.tenantId, query.orderId);
+    if (order && order.sellerId === context.sellerId) {
+      const items = order.items;
+      const sale = query.saleId ? await repo.getSaleView(context.tenantId, query.saleId) : null;
+      const payments = await repo.listPayments(context.tenantId, { orderId: order.id });
+      const latestPayment = payments[0] ?? null;
       receipt = {
         orderTotal: order.total,
         orderStatus: order.status,
         paymentMethod: order.paymentMethod ?? null,
         customerPhone: order.customerPhone ?? null,
+        paymentStatus: latestPayment?.status ?? null,
         saleTotal: sale ? sale.total : null,
         lines: items.map((item) => ({ name: item.itemName, quantity: item.quantity, lineTotal: item.lineTotal })),
       };
@@ -104,7 +111,7 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
           </p>
         ) : receipt ? (
           <div className="stack" style={{ marginTop: 16 }}>
-            <h2>{receipt.saleTotal !== null ? 'Sale completed' : `Order ${receipt.orderStatus}`}</h2>
+            <h2>{receipt.saleTotal !== null ? 'Sale completed' : receipt.paymentStatus === 'PENDING' ? 'Payment pending' : `Order ${receipt.orderStatus}`}</h2>
             <div className="stack">
               {receipt.lines.map((line, index) => (
                 <div key={index} className="list-row">
@@ -120,11 +127,27 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
             <p className="muted">
               Total {formatCurrency(receipt.saleTotal ?? receipt.orderTotal, context.currencyCode)}
               {receipt.saleTotal === null
-                ? receipt.paymentMethod === 'MPESA'
-                  ? ` · M-Pesa payment not yet enabled — order held for review, no payment collected${receipt.customerPhone ? ` (${receipt.customerPhone})` : ''}`
-                  : ' · waiting for admin review'
-                : ''}
+                ? receipt.paymentStatus === 'PENDING'
+                  ? ` · Payment pending — awaiting customer confirmation${receipt.customerPhone ? ` (${receipt.customerPhone})` : ''}`
+                  : receipt.paymentStatus === 'FAILED'
+                    ? ' · Payment failed — retry below'
+                    : receipt.paymentMethod === 'MPESA'
+                      ? ` · M-Pesa order held for payment${receipt.customerPhone ? ` (${receipt.customerPhone})` : ''}`
+                      : ' · waiting for admin review'
+                : ` · ${receipt.paymentMethod ?? 'CASH'} · ${receipt.paymentStatus ?? 'paid'}`}
             </p>
+            {receipt.paymentMethod === 'MPESA' && receipt.saleTotal === null && (
+              <form action={retrySellerQrPaymentAction} className="field-grid">
+                <input type="hidden" name="reference" value={reference} />
+                <input type="hidden" name="bearer" value={bearer} />
+                <input type="hidden" name="orderId" value={query.orderId ?? ''} />
+                <div className="hero-actions" style={{ marginTop: 0 }}>
+                  <button type="submit" className="button">
+                    Retry M-Pesa payment
+                  </button>
+                </div>
+              </form>
+            )}
             <a className="button secondary" href={`/sell/${reference}?k=${encodeURIComponent(bearer)}`}>
               New sale
             </a>

@@ -103,8 +103,8 @@ async function main() {
   // ── B. metadata ──
   console.log('== metadata ==');
   await check('meta', 'new tables exist', async () => {
-    const rows = await q(`select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','order_items','sales','sale_items','attendance_terminals','attendance_records','seller_credentials','sale_amendments')`);
-    assert(rows.length === 10, `expected 10 tables, got ${rows.length}`);
+    const rows = await q(`select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','order_items','sales','sale_items','attendance_terminals','attendance_records','seller_credentials','sale_amendments','payments')`);
+    assert(rows.length === 11, `expected 11 tables, got ${rows.length}`);
     return rows.map((r) => r.tablename).sort().join(',');
   });
 
@@ -144,23 +144,23 @@ async function main() {
   });
 
   await check('meta', 'foreign keys reference tenant-scoped parents', async () => {
-    const rows = await q(`select count(*)::int as n from pg_constraint where conrelid in ('public.order_items'::regclass,'public.sale_items'::regclass,'public.inventory_movements'::regclass,'public.attendance_records'::regclass) and contype='f'`);
-    assert(rows[0].n >= 8, `expected >=8 FKs, got ${rows[0].n}`);
+    const rows = await q(`select count(*)::int as n from pg_constraint where conrelid in ('public.order_items'::regclass,'public.sale_items'::regclass,'public.inventory_movements'::regclass,'public.attendance_records'::regclass,'public.payments'::regclass) and contype='f'`);
+    assert(rows[0].n >= 10, `expected >=10 FKs, got ${rows[0].n}`);
     return `${rows[0].n} FKs`;
   });
 
   await check('meta', 'RLS enabled+forced with policies', async () => {
-    const rows = await q(`select relname, relrowsecurity as enabled, relforcerowsecurity as forced from pg_class where relname in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records','seller_credentials','sale_amendments')`);
-    assert(rows.length === 10, 'tables missing');
+    const rows = await q(`select relname, relrowsecurity as enabled, relforcerowsecurity as forced from pg_class where relname in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records','seller_credentials','sale_amendments','payments')`);
+    assert(rows.length === 11, 'tables missing');
     for (const row of rows) {
       assert(row.enabled && row.forced, `RLS not enforced on ${row.relname}`);
     }
-    const pols = await q(`select tablename, count(*)::int as n from pg_policies where schemaname='public' and tablename in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records','seller_credentials','sale_amendments') group by tablename`);
-    assert(pols.length === 10, `policies missing on some tables: ${JSON.stringify(pols)}`);
+    const pols = await q(`select tablename, count(*)::int as n from pg_policies where schemaname='public' and tablename in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records','seller_credentials','sale_amendments','payments') group by tablename`);
+    assert(pols.length === 11, `policies missing on some tables: ${JSON.stringify(pols)}`);
     for (const row of pols) {
       assert(row.n >= 4, `${row.tablename} has ${row.n} policies, expected >=4`);
     }
-    return '10 tables x enforced RLS x >=4 policies';
+    return '11 tables x enforced RLS x >=4 policies';
   });
 
   // ── C. smoke ──
@@ -320,7 +320,7 @@ async function main() {
   await admin.query(`grant usage on schema public to ${ROLE}`);
   await admin.query(`grant usage on schema app to ${ROLE}`);
   await admin.query(`grant execute on all functions in schema app to ${ROLE}`);
-  for (const table of ['tenants', 'users', 'customers', 'services', 'products', 'service_product_links', 'inventory_movements', 'orders', 'order_items', 'sales', 'sale_items', 'attendance_terminals', 'attendance_records', 'seller_credentials', 'sale_amendments']) {
+  for (const table of ['tenants', 'users', 'customers', 'services', 'products', 'service_product_links', 'inventory_movements', 'orders', 'order_items', 'sales', 'sale_items', 'attendance_terminals', 'attendance_records', 'seller_credentials', 'sale_amendments', 'payments']) {
     await admin.query(`grant select, insert, update on public.${table} to ${ROLE}`);
   }
   // Second tenant with its own rows for isolation probes (run-scoped slugs).
@@ -362,6 +362,7 @@ async function main() {
         ['attendance', `select count(*)::int as n from attendance_records`],
         ['credentials', `select count(*)::int as n from seller_credentials`],
         ['amendments', `select count(*)::int as n from sale_amendments`],
+        ['payments', `select count(*)::int as n from payments`],
       ]) {
         out[label] = (await c.query(sql)).rows[0].n;
       }
@@ -369,7 +370,7 @@ async function main() {
       out.terminals = (await c.query(`select reference from attendance_terminals`)).rows.map((r) => r.reference);
       return out;
     });
-    for (const label of ['orders', 'sales', 'movements', 'attendance', 'credentials', 'amendments']) {
+    for (const label of ['orders', 'sales', 'movements', 'attendance', 'credentials', 'amendments', 'payments']) {
       assert(counts[label] === 0, `tenant B saw ${counts[label]} rows in ${label}`);
     }
     assert(JSON.stringify(counts.terminals) === JSON.stringify([`att-other-${RUN}`]), `tenant B terminals wrong: ${JSON.stringify(counts.terminals)}`);

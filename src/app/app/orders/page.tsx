@@ -11,8 +11,14 @@ import {
   voidCommerceSaleAction,
 } from '@/server/actions/commerce';
 import {
+  expireOverduePaymentsAction,
+  recoverPaidOrderAction,
+  retryOrderPaymentAction,
+} from '@/server/actions/payments';
+import {
   getCommerceOrder,
   getCommerceSale,
+  getOrderPayments,
   getTenantPolicy,
   listCommerceOrders,
   listCommerceSales,
@@ -89,6 +95,8 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
   ]);
   const selectedOrder = params.orderId ? await getCommerceOrder(commerce, params.orderId) : null;
   const selectedSale = params.saleId ? await getCommerceSale(commerce, params.saleId) : null;
+  const selectedOrderPayments = selectedOrder ? await getOrderPayments(commerce, selectedOrder.id) : [];
+  const selectedSalePayments = selectedSale ? await getOrderPayments(commerce, selectedSale.orderId) : [];
   const feedback = getMessage(params);
   const actionable = orders.filter(
     (order) => order.status === 'SUBMITTED' || order.status === 'PENDING_REVIEW',
@@ -310,6 +318,8 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
           <h2>Order detail</h2>
           <p className="panel-copy">
             {selectedOrder.id} · {selectedOrder.status} · total {formatCurrency(selectedOrder.total, tenant.currencyCode)}
+            {selectedOrder.paymentMethod ? ` · ${selectedOrder.paymentMethod}` : ''}
+            {selectedOrder.customerPhone ? ` · ${selectedOrder.customerPhone}` : ''}
           </p>
           <div className="stack">
             {selectedOrder.items.map((item) => (
@@ -329,6 +339,62 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
               </div>
             ))}
           </div>
+          <div className="panel-header" style={{ marginTop: 16 }}>
+            <div>
+              <h3>Payments ({selectedOrderPayments.length})</h3>
+              <p className="panel-copy">Masked phones; full numbers stay server-side. Cash shows as SUCCESS.</p>
+            </div>
+          </div>
+          <div className="stack">
+            {selectedOrderPayments.map((payment) => (
+              <div key={payment.id} className="list-row">
+                <div>
+                  <strong>
+                    {payment.method} · {payment.status}
+                    {payment.needsRecovery ? ' · needs recovery' : ''}
+                  </strong>
+                  <div className="eyebrow">
+                    {formatCurrency(payment.amount, payment.currencyCode)} · {payment.provider}
+                    {payment.providerReference ? ` · ref ${payment.providerReference}` : ''} ·{' '}
+                    {payment.customerPhone ? `phone ${payment.customerPhone}` : 'no phone'} ·{' '}
+                    {payment.failureReason ? ` · ${payment.failureReason}` : ''}
+                  </div>
+                  <div className="eyebrow">
+                    {payment.initiatedAt.slice(0, 16).replace('T', ' ')}
+                    {payment.confirmedAt ? ` → ${payment.confirmedAt.slice(0, 16).replace('T', ' ')}` : ''}
+                    {payment.expiresAt ? ` · expires ${payment.expiresAt.slice(0, 16).replace('T', ' ')}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {isAdmin && payment.status === 'SUCCESS' && payment.needsRecovery ? (
+                    <form action={recoverPaidOrderAction}>
+                      <input type="hidden" name="paymentId" value={payment.id} />
+                      <input type="hidden" name="orderId" value={selectedOrder.id} />
+                      <button type="submit" className="button secondary">
+                        Recover sale
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+            {selectedOrderPayments.length === 0 ? <div className="eyebrow">No payments yet.</div> : null}
+          </div>
+          {isAdmin && (selectedOrder.status === 'PENDING_REVIEW' || selectedOrder.status === 'APPROVED') ? (
+            <div className="hero-actions" style={{ marginTop: 12 }}>
+              <form action={retryOrderPaymentAction}>
+                <input type="hidden" name="orderId" value={selectedOrder.id} />
+                <button type="submit" className="button secondary">
+                  Retry M-Pesa payment
+                </button>
+              </form>
+              <form action={expireOverduePaymentsAction}>
+                <button type="submit" className="button secondary">
+                  Expire overdue intents
+                </button>
+              </form>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -338,6 +404,7 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
           <p className="panel-copy">
             {selectedSale.id} · {selectedSale.status} · total {formatCurrency(selectedSale.total, tenant.currencyCode)}
             {selectedSale.voidReason ? ` · void: ${selectedSale.voidReason}` : ''}
+            {selectedSale.paymentMethod ? ` · ${selectedSale.paymentMethod}` : ''}
           </p>
           <div className="stack">
             {selectedSale.items.map((item) => (
@@ -356,6 +423,29 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
               </div>
             ))}
           </div>
+          {selectedSalePayments.length > 0 ? (
+            <>
+              <div className="panel-header" style={{ marginTop: 16 }}>
+                <div>
+                  <h3>Payments for this sale's order ({selectedSalePayments.length})</h3>
+                </div>
+              </div>
+              <div className="stack">
+                {selectedSalePayments.map((payment) => (
+                  <div key={payment.id} className="list-row">
+                    <div>
+                      <strong>
+                        {payment.method} · {payment.status}
+                      </strong>
+                      <div className="eyebrow">
+                        {formatCurrency(payment.amount, payment.currencyCode)} · {payment.providerReference ?? 'no ref'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
         </section>
       ) : null}
     </>

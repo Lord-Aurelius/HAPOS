@@ -15,6 +15,7 @@ tags:
   - name: Inventory
   - name: Orders
   - name: Sales
+  - name: Payments
   - name: Attendance
   - name: Customers
   - name: Service Records
@@ -1220,6 +1221,58 @@ paths:
           description: QR image
         '400':
           $ref: '#/components/responses/BadRequest'
+  /v1/payments:
+    get:
+      tags: [Payments]
+      summary: List payments for the tenant
+      description: Accessible to `shop_admin` and `super_admin`. Supports `orderId`, `status`, and `needsRecovery` filters.
+      responses:
+        '200':
+          description: Payment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payment'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+  /v1/payments/{paymentId}:
+    get:
+      tags: [Payments]
+      summary: Read one payment
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payment detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/payments/callback:
+    post:
+      tags: [Payments]
+      summary: PaymentOS callback endpoint
+      security: []
+      description: Provider-authenticated. Verifies HMAC, validates tenant/amount, transitions payment, and finalizes the sale atomically. Idempotent on duplicate deliveries.
+      responses:
+        '200':
+          description: Callback processed
+        '401':
+          description: Callback unauthenticated
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/ai/chat:
     post:
       tags: [AI]
@@ -2190,5 +2243,62 @@ components:
         revokedAt:
           type: string
           nullable: true
+        createdAt:
+          type: string
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+        orderId:
+          type: string
+          nullable: true
+        saleId:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          enum: [PAYMENTOS, INTERNAL]
+        method:
+          type: string
+          enum: [CASH, MPESA]
+        status:
+          type: string
+          enum: [PENDING, SUCCESS, FAILED, EXPIRED, CANCELLED]
+        amount:
+          type: number
+        currencyCode:
+          type: string
+        customerPhone:
+          type: string
+          nullable: true
+          description: Masked in reads (e.g. +254712***678).
+        providerReference:
+          type: string
+          nullable: true
+        providerRequestId:
+          type: string
+          nullable: true
+        attemptNumber:
+          type: integer
+        initiatedAt:
+          type: string
+        confirmedAt:
+          type: string
+          nullable: true
+        failedAt:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          nullable: true
+        failureCode:
+          type: string
+          nullable: true
+        failureReason:
+          type: string
+          nullable: true
+        needsRecovery:
+          type: boolean
         createdAt:
           type: string

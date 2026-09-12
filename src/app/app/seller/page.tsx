@@ -1,6 +1,6 @@
 import { formatCurrency } from '@/lib/format';
 import { requireSession } from '@/server/auth/demo-session';
-import { listCommerceOrders, listCommerceSales } from '@/server/commerce/order-service';
+import { getOrderPayments, listCommerceOrders, listCommerceSales } from '@/server/commerce/order-service';
 
 type SellerPageProps = {
   searchParams: Promise<{ orderId?: string; saleId?: string }>;
@@ -31,6 +31,7 @@ export default async function SellerPortalPage({ searchParams }: SellerPageProps
   const pending = orders.filter((order) => order.status === 'SUBMITTED' || order.status === 'PENDING_REVIEW');
   const selectedOrder = params.orderId ? orders.find((order) => order.id === params.orderId) ?? null : null;
   const selectedSale = params.saleId ? sales.find((sale) => sale.id === params.saleId) ?? null : null;
+  const selectedOrderPayments = selectedOrder ? await getOrderPayments({ tenantId: tenant.id, userId: session.user.id, userRole: session.user.role } as const, selectedOrder.id) : [];
 
   const statusGroups: { label: string; items: typeof orders }[] = [
     { label: 'Pending review', items: pending },
@@ -127,6 +128,8 @@ export default async function SellerPortalPage({ searchParams }: SellerPageProps
           <h2>Order detail (read-only)</h2>
           <p className="panel-copy">
             {selectedOrder.id} · {selectedOrder.status} · total {formatCurrency(selectedOrder.total, tenant.currencyCode)}
+            {selectedOrder.paymentMethod ? ` · ${selectedOrder.paymentMethod}` : ''}
+            {selectedOrder.customerPhone ? ` · ${selectedOrder.customerPhone}` : ''}
           </p>
           <div className="stack">
             {selectedOrder.items.map((item) => (
@@ -145,6 +148,24 @@ export default async function SellerPortalPage({ searchParams }: SellerPageProps
               </div>
             ))}
           </div>
+          {selectedOrderPayments.length > 0 ? (
+            <div className="stack" style={{ marginTop: 12 }}>
+              <h3>Payments</h3>
+              {selectedOrderPayments.map((payment) => (
+                <div key={payment.id} className="list-row">
+                  <div>
+                    <strong>
+                      {payment.method} · {payment.status}
+                    </strong>
+                    <div className="eyebrow">
+                      {formatCurrency(payment.amount, payment.currencyCode)} · {payment.providerReference ?? 'no ref'} ·{' '}
+                      {payment.customerPhone ?? ''} {payment.needsRecovery ? ' · needs recovery' : ''}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
