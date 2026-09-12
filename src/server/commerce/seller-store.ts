@@ -20,6 +20,7 @@ import {
   generateSellerBearer,
   hashSellerBearer,
 } from './seller.ts';
+import { sealBearer } from '../crypto/qr-wrap.ts';
 
 export type SellerUser = {
   id: string;
@@ -34,6 +35,8 @@ export type SellerCredentialRow = {
   sellerId: string;
   publicReference: string;
   tokenHash: string;
+  /** AES-GCM sealed bearer for persistent QR renders (null until a keyed rotation). */
+  bearerWrapped?: string | null;
   status: string;
   issuedAt: string;
   lastUsedAt?: string | null;
@@ -56,6 +59,8 @@ export type SellerContext = {
   generateId?: () => string;
   bearerHex?: string;
   referenceHex?: string;
+  /** 32-byte wrap key: when present, the bearer is sealed for later renders. */
+  wrapKey?: Buffer | null;
 };
 
 function contextNow(ctx: SellerContext): string {
@@ -105,6 +110,7 @@ function mintCredential(
     sellerId: input.sellerId,
     publicReference: buildSellerReference(ctx.referenceHex),
     tokenHash: hashSellerBearer(bearer),
+    bearerWrapped: ctx.wrapKey ? sealBearer(bearer, ctx.wrapKey) : null,
     status: 'ACTIVE',
     issuedAt: now,
     lastUsedAt: null,

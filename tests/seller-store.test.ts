@@ -236,3 +236,38 @@ describe('QR replay and device copying', () => {
     assert.ok(credential.lastUsedAt);
   });
 });
+
+describe('sealed bearer copies (persistent QR without plaintext)', () => {
+  it('stores a sealed copy alongside the hash when a wrap key is provided', async () => {
+    const { openBearer, parseQrWrapKey } = await import('../src/server/crypto/qr-wrap.ts');
+    const store = testStore();
+    const key = parseQrWrapKey('a1'.repeat(32));
+    const { credential, bearer } = issueSellerCredential(
+      store, { tenantId: 'tenant-a', sellerId: 'seller-1' }, { generateId, bearerHex: BEARER_HEX, wrapKey: key },
+    );
+    assert.ok(credential.bearerWrapped);
+    assert.notEqual(credential.bearerWrapped, bearer);
+    assert.equal(openBearer(credential.bearerWrapped ?? null, key), bearer);
+    // Verification still uses the hash, never the sealed copy.
+    const context = verifySellerCredential(
+      store, { tenantId: 'tenant-a', reference: credential.publicReference, bearer }, {},
+    );
+    assert.equal(context.credentialId, credential.id);
+  });
+
+  it('stores no sealed copy without a key and rotates replace it', async () => {
+    const { openBearer, parseQrWrapKey } = await import('../src/server/crypto/qr-wrap.ts');
+    const store = testStore();
+    const plain = issueSellerCredential(
+      store, { tenantId: 'tenant-a', sellerId: 'seller-1' }, { generateId, bearerHex: BEARER_HEX },
+    );
+    assert.equal(plain.credential.bearerWrapped ?? null, null);
+
+    const key = parseQrWrapKey('a1'.repeat(32));
+    const rotated = rotateSellerCredential(
+      store, { tenantId: 'tenant-a', sellerId: 'seller-1' }, { generateId, bearerHex: 'f6'.repeat(32), wrapKey: key },
+    );
+    assert.ok(rotated.credential.bearerWrapped);
+    assert.equal(openBearer(rotated.credential.bearerWrapped ?? null, key), rotated.bearer);
+  });
+});

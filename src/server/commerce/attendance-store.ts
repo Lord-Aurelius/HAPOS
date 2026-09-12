@@ -23,6 +23,7 @@ import {
   merchantDateOf,
   normalizeEmployeeNumber,
 } from './attendance.ts';
+import { sealBearer } from '../crypto/qr-wrap.ts';
 
 export type AttendanceUser = {
   id: string;
@@ -37,6 +38,8 @@ export type AttendanceTerminalRow = {
   tenantId: string;
   reference: string;
   tokenHash: string;
+  /** AES-GCM sealed token for persistent QR renders (null until keyed rotation). */
+  tokenWrapped?: string | null;
   isActive: boolean;
   revokedAt?: string | null;
   createdBy?: string | null;
@@ -68,6 +71,8 @@ export type AttendanceContext = {
   now?: string;
   generateId?: () => string;
   tokenHex?: string;
+  /** 32-byte wrap key: when present, the token is sealed for later renders. */
+  wrapKey?: Buffer | null;
 };
 
 function contextNow(ctx: AttendanceContext): string {
@@ -252,6 +257,7 @@ export function rotateTerminal(
 ): RotatedTerminal {
   const now = contextNow(ctx);
   const token = generateTerminalToken(ctx.tokenHex);
+  const tokenWrapped = ctx.wrapKey ? sealBearer(token, ctx.wrapKey) : null;
   let terminal = store.attendanceTerminals.find((item) => item.tenantId === input.tenantId) ?? null;
   if (!terminal) {
     terminal = {
@@ -259,6 +265,7 @@ export function rotateTerminal(
       tenantId: input.tenantId,
       reference: buildTerminalReference(input.shopSlug, ctx.tokenHex),
       tokenHash: hashTerminalToken(token),
+      tokenWrapped,
       isActive: true,
       revokedAt: null,
       createdBy: input.createdBy ?? null,
@@ -270,6 +277,7 @@ export function rotateTerminal(
   }
 
   terminal.tokenHash = hashTerminalToken(token);
+  terminal.tokenWrapped = tokenWrapped;
   terminal.isActive = true;
   terminal.revokedAt = null;
   terminal.updatedAt = now;

@@ -177,6 +177,23 @@ describe('rotateTerminal / verifyTerminalToken', () => {
     );
   });
 
+  it('seals the token for persistent renders when a wrap key is provided', async () => {
+    const { openBearer, parseQrWrapKey } = await import('../src/server/crypto/qr-wrap.ts');
+    const store = testStore();
+    const key = parseQrWrapKey('a1'.repeat(32));
+    const rotated = rotateTerminal(
+      store, { tenantId: 'tenant-a', shopSlug: 'shop-a' }, { generateId, tokenHex: TOKEN_HEX, wrapKey: key },
+    );
+    assert.ok(rotated.terminal.tokenWrapped);
+    assert.equal(openBearer(rotated.terminal.tokenWrapped ?? null, key), rotated.token);
+    // Rotation replaces the sealed copy with the fresh token.
+    const again = rotateTerminal(
+      store, { tenantId: 'tenant-a', shopSlug: 'shop-a' }, { generateId, tokenHex: 'c3'.repeat(32), wrapKey: key },
+    );
+    assert.equal(openBearer(again.terminal.tokenWrapped ?? null, key), again.token);
+    assert.notEqual(again.token, rotated.token);
+  });
+
   it('rejects missing, wrong and cross-context tokens', () => {
     const store = testStore();
     const rotated = rotateTerminal(store, { tenantId: 'tenant-a', shopSlug: 'shop-a' }, { generateId, tokenHex: TOKEN_HEX });
