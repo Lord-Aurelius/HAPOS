@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { requireSession } from '@/server/auth/demo-session';
+import { CartFormError, parseCartFormEntries } from '@/server/commerce/cart-form';
 import {
   approveCommerceOrder,
   cancelCommerceOrder,
@@ -39,26 +40,9 @@ function failureRedirect(orderId: string | null, error: unknown) {
   redirect(orderId ? `/app/orders?orderId=${orderId}&error=${code}` : `/app/orders?error=${code}`);
 }
 
-/** Parse up to 4 no-JS cart rows (`line_<i>_kind/refId/quantity/actual/reason`). */
+/** Parse the 4 no-JS cart rows via the shared normalizer (skips blank items). */
 function parseFormCart(formData: FormData): CartLineRequest[] {
-  const lines: CartLineRequest[] = [];
-  for (let index = 0; index < 4; index += 1) {
-    const kind = formString(formData, `line_${index}_kind`);
-    const refId = formString(formData, `line_${index}_refId`);
-    const quantityRaw = formString(formData, `line_${index}_quantity`);
-    if (!kind && !refId && !quantityRaw) {
-      continue;
-    }
-    const actualRaw = formString(formData, `line_${index}_actual`);
-    lines.push({
-      kind: kind === 'service' ? 'service' : 'product',
-      refId,
-      quantity: quantityRaw ? Number(quantityRaw) : 0,
-      actualUnitPrice: actualRaw ? Number(actualRaw) : null,
-      overrideReason: formString(formData, `line_${index}_reason`) || null,
-    });
-  }
-  return lines;
+  return parseCartFormEntries(formData.entries());
 }
 
 export async function createCommerceOrderAction(formData: FormData) {

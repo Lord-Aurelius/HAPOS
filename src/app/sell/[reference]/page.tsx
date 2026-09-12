@@ -2,6 +2,7 @@ import { formatCurrency } from '@/lib/format';
 import { SellerError } from '@/server/commerce/seller';
 import { checkSellerRateLimit } from '@/server/auth/seller-limit';
 import { getSellerQrContext, submitSellerQrOrderAction } from '@/server/actions/seller';
+import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { getCatalog } from '@/server/services/app-data';
 import { readStore } from '@/server/store';
 
@@ -163,10 +164,11 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
                     </optgroup>
                   </select>
                 </div>
-                <div className="field">
-                  <label htmlFor={`line_${index}_quantity`}>Item {index + 1} — quantity</label>
-                  <input id={`line_${index}_quantity`} name={`line_${index}_quantity`} type="number" min="0" step="1" />
-                </div>
+                <QuantityStepper
+                  fieldName={`line_${index}_quantity`}
+                  inputId={`line_${index}_quantity`}
+                  label={`Item ${index + 1} — quantity`}
+                />
                 <div className="field">
                   <label htmlFor={`line_${index}_actual`}>Item {index + 1} — actual price (blank = catalog)</label>
                   <input id={`line_${index}_actual`} name={`line_${index}_actual`} type="number" min="0" step="1" />

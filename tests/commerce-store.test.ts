@@ -583,3 +583,73 @@ describe('M-Pesa payment intent (held for Phase 4)', () => {
     assert.equal(route, 'AUTO_APPROVE');
   });
 });
+
+describe('quantity-1 mixed carts agree everywhere', () => {
+  it('product x1 + service x1: line, cart, inventory and sale totals agree', () => {
+    const store = testStore();
+    const { order } = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [
+        { kind: 'product', refId: 'prod-oil', quantity: 1 },
+        { kind: 'service', refId: 'svc-cut', quantity: 1 },
+      ],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+    }, { generateId });
+    submitOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    const { sale } = approveOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...ADMIN }, { generateId });
+
+    assert.equal(order.total, 800 + 250);
+    assert.equal(sale.total, 1050);
+    const oilItem = store.saleItems.find((i) => i.productId === 'prod-oil');
+    assert.equal(oilItem?.quantity, 1);
+    assert.equal(oilItem?.lineTotal, 800);
+    assert.equal(store.products.find((p) => p.id === 'prod-oil')?.quantityOnHand, 9);
+    const saleMovement = (store.inventoryMovements ?? []).find((m) => m.movementType === 'SALE');
+    assert.equal(saleMovement?.quantity, -1);
+  });
+
+  it('stock 1 with sale qty 1 succeeds to zero; second sale rejected, stock stays 0', () => {
+    const store = testStore();
+    store.products.find((p) => p.id === 'prod-oil')!.quantityOnHand = 1;
+
+    const first = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [{ kind: 'product', refId: 'prod-oil', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+    }, { generateId });
+    submitOrder(store, { tenantId: 'tenant-a', orderId: first.order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    approveOrder(store, { tenantId: 'tenant-a', orderId: first.order.id, ...ADMIN }, { generateId });
+    assert.equal(store.products.find((p) => p.id === 'prod-oil')?.quantityOnHand, 0);
+
+    const second = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [{ kind: 'product', refId: 'prod-oil', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+    }, { generateId });
+    submitOrder(store, { tenantId: 'tenant-a', orderId: second.order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    assert.throws(
+      () => approveOrder(store, { tenantId: 'tenant-a', orderId: second.order.id, ...ADMIN }, { generateId }),
+      (error: unknown) => error instanceof CommerceError && error.code === 'insufficient-stock',
+    );
+    assert.equal(store.products.find((p) => p.id === 'prod-oil')?.quantityOnHand, 0);
+  });
+
+  it('qty-1 retry under one key yields one order, one sale, one movement', () => {
+    const store = testStore();
+    const input = {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR' as const,
+      lines: [{ kind: 'product' as const, refId: 'prod-oil', quantity: 1 }],
+      idempotencyKey: 'qty1-retry-1',
+      creatorRole: 'staff' as const, creatorId: 'staff-1', orderReviewRequired: true,
+    };
+    const first = createOrder(store, input, { generateId });
+    const retry = createOrder(store, input, { generateId });
+    assert.equal(retry.duplicate, true);
+    submitOrder(store, { tenantId: 'tenant-a', orderId: first.order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    approveOrder(store, { tenantId: 'tenant-a', orderId: first.order.id, ...ADMIN }, { generateId });
+    assert.equal(store.orders.length, 1);
+    assert.equal(store.sales.length, 1);
+    assert.equal((store.inventoryMovements ?? []).filter((m) => m.movementType === 'SALE').length, 1);
+    assert.equal(store.products.find((p) => p.id === 'prod-oil')?.quantityOnHand, 9);
+  });
+});

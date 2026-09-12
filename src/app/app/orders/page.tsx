@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { formatCurrency } from '@/lib/format';
+import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { requireSession } from '@/server/auth/demo-session';
 import {
   approveCommerceOrderAction,
@@ -240,10 +241,11 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
                     </optgroup>
                   </select>
                 </div>
-                <div className="field">
-                  <label htmlFor={`line_${index}_quantity`}>Item {index + 1} — quantity</label>
-                  <input id={`line_${index}_quantity`} name={`line_${index}_quantity`} type="number" min="0" step="1" />
-                </div>
+                <QuantityStepper
+                  fieldName={`line_${index}_quantity`}
+                  inputId={`line_${index}_quantity`}
+                  label={`Item ${index + 1} — quantity`}
+                />
                 <div className="field">
                   <label htmlFor={`line_${index}_actual`}>Item {index + 1} — actual price (blank = catalog)</label>
                   <input id={`line_${index}_actual`} name={`line_${index}_actual`} type="number" min="0" step="1" />

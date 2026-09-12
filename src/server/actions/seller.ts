@@ -23,6 +23,7 @@ import {
   type CommerceStore,
 } from '@/server/commerce/commerce-store';
 import { CommerceError, type CartLineRequest } from '@/server/commerce/orders';
+import { CartFormError, parseCartFormEntries } from '@/server/commerce/cart-form';
 import { InventoryError } from '@/server/commerce/inventory';
 import { SaleValidationError, parseKenyanPhoneInput } from '@/server/commerce/sale-validation';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
@@ -42,7 +43,8 @@ function sellerErrorCode(error: unknown): string {
     error instanceof SellerError ||
     error instanceof CommerceError ||
     error instanceof InventoryError ||
-    error instanceof SaleValidationError
+    error instanceof SaleValidationError ||
+    error instanceof CartFormError
   ) {
     return error.code;
   }
@@ -137,26 +139,9 @@ export async function revokeSellerCredentialAction(formData: FormData) {
 
 // ── Public QR transaction (transaction-only context) ─────────────────────────
 
-/** Parse up to 4 no-JS cart rows (`line_<i>_kind/refId/quantity/actual/reason`). */
+/** Parse the 4 no-JS cart rows via the shared normalizer (skips blank items). */
 function parseQrCart(formData: FormData): CartLineRequest[] {
-  const lines: CartLineRequest[] = [];
-  for (let index = 0; index < 4; index += 1) {
-    const kind = formString(formData, `line_${index}_kind`);
-    const refId = formString(formData, `line_${index}_refId`);
-    const quantityRaw = formString(formData, `line_${index}_quantity`);
-    if (!kind && !refId && !quantityRaw) {
-      continue;
-    }
-    const actualRaw = formString(formData, `line_${index}_actual`);
-    lines.push({
-      kind: kind === 'service' ? 'service' : 'product',
-      refId,
-      quantity: quantityRaw ? Number(quantityRaw) : 0,
-      actualUnitPrice: actualRaw ? Number(actualRaw) : null,
-      overrideReason: formString(formData, `line_${index}_reason`) || null,
-    });
-  }
-  return lines;
+  return parseCartFormEntries(formData.entries());
 }
 
 export async function submitSellerQrOrderAction(formData: FormData) {

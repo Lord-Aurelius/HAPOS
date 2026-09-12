@@ -8,6 +8,7 @@
 
 import type { Order, OrderItem, Sale, SaleItem } from '@/lib/types';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
+import { CartFormError } from '@/server/commerce/cart-form';
 import {
   approveOrder,
   cancelOrder,
@@ -46,6 +47,9 @@ export function toServiceError(error: unknown): ServiceError {
     if (error.code === 'unknown-item') {
       return { status: 404, code: error.code, message: error.message };
     }
+    return { status: 400, code: error.code, message: error.message };
+  }
+  if (error instanceof CartFormError) {
     return { status: 400, code: error.code, message: error.message };
   }
   if (error instanceof InventoryError) {
