@@ -93,6 +93,8 @@ export function createSeedStore(): StoreState {
         password: hashPassword(demoCredentials.shopAdmin.password),
         passwordUpdatedAt: now,
         isActive: true,
+        // Phase 2A dev employee numbers (production assigns via staff settings).
+        employeeNumber: 'EMP-0001',
         commissionType: 'percentage',
         commissionValue: 0,
         commissionNotes: 'Admin oversight role',
@@ -110,6 +112,7 @@ export function createSeedStore(): StoreState {
         password: hashPassword(demoCredentials.staffBrian.password),
         passwordUpdatedAt: now,
         isActive: true,
+        employeeNumber: 'EMP-0002',
         commissionType: 'percentage',
         commissionValue: 35,
         commissionNotes: '35% on recorded services',
@@ -127,6 +130,7 @@ export function createSeedStore(): StoreState {
         password: hashPassword(demoCredentials.staffMercy.password),
         passwordUpdatedAt: now,
         isActive: true,
+        employeeNumber: 'EMP-0003',
         commissionType: 'fixed',
         commissionValue: 900,
         commissionNotes: 'Fixed braid commission',
@@ -144,6 +148,7 @@ export function createSeedStore(): StoreState {
         password: hashPassword(demoCredentials.secondAdmin.password),
         passwordUpdatedAt: now,
         isActive: true,
+        employeeNumber: 'EMP-0004',
         commissionType: 'percentage',
         commissionValue: 0,
         commissionNotes: 'Admin oversight role',
@@ -468,5 +473,9 @@ export function createSeedStore(): StoreState {
     orderItems: [],
     sales: [],
     saleItems: [],
+    // Phase 2A transitional projections start empty; terminals are
+    // auto-provisioned by migration (SQL-authoritative later).
+    attendanceTerminals: [],
+    attendanceRecords: [],
   };
 }

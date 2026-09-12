@@ -6,6 +6,8 @@ import { cache } from 'react';
 
 import type {
   AppSession,
+  AttendanceRecord,
+  AttendanceTerminal,
   Customer,
   CustomerAppSession,
   InventoryMovement,
@@ -27,12 +29,15 @@ import { formatPlanCode, getDefaultSubscriptionPackageBlueprints, isPlatinumPlan
 import { normalizeStoreAssetReferences } from '@/server/assets';
 import { getDatabaseConfigHint } from '@/server/db/config';
 import { getPool } from '@/server/db/client';
+import { buildTerminalReference, hashTerminalToken } from '@/server/commerce/attendance';
 import { ensureCatalogProjection } from '@/server/commerce/inventory-store';
 import { getRuntimeBackend } from '@/server/runtime';
 import { createSeedStore } from '@/server/store/seed';
 import { verifyPassword } from '@/server/store/passwords';
 import { isActiveServiceRecord } from '@/server/store/service-records';
 import type {
+  StoreAttendanceRecord,
+  StoreAttendanceTerminal,
   StoreCustomer,
   StoreCustomerSession,
   StoreExpense,
@@ -433,6 +438,47 @@ function migrateStoreState(parsed: StoreState) {
     }
   }
 
+  // Phase 2A attendance backfill: employee numbers default null (assigned by
+  // admins afterwards); one active terminal is provisioned per tenant lacking
+  // one. Only the token HASH is stored — admins rotate to obtain a QR-able
+  // token for auto-provisioned terminals.
+  if (!Array.isArray(parsed.attendanceTerminals)) {
+    parsed.attendanceTerminals = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.attendanceRecords)) {
+    parsed.attendanceRecords = [];
+    changed = true;
+  }
+
+  for (const user of parsed.users) {
+    if (!('employeeNumber' in user)) {
+      user.employeeNumber = null;
+      changed = true;
+    }
+  }
+
+  for (const tenant of parsed.tenants) {
+    const hasTerminal = parsed.attendanceTerminals.some((terminal) => terminal.tenantId === tenant.id);
+    if (!hasTerminal) {
+      const token = randomUUID().replace(/-/g, '');
+      const now = new Date().toISOString();
+      parsed.attendanceTerminals.push({
+        id: randomUUID(),
+        tenantId: tenant.id,
+        reference: buildTerminalReference(tenant.slug, token),
+        tokenHash: hashTerminalToken(token),
+        isActive: true,
+        revokedAt: null,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      changed = true;
+    }
+  }
+
   return { store: parsed, changed };
 }
 
@@ -633,6 +679,7 @@ function userFromStore(user: StoreUser): User {
     phone: user.phone,
     role: user.role,
     isActive: user.isActive,
+    employeeNumber: user.employeeNumber ?? null,
     commissionType: user.commissionType,
     commissionValue: user.commissionValue,
     commissionNotes: user.commissionNotes,
@@ -985,6 +1032,81 @@ export async function getSaleById(tenantId: string, saleId: string) {
   const store = await readStore();
   const sale = (store.sales ?? []).find((item) => item.id === saleId && item.tenantId === tenantId) ?? null;
   return sale ? saleFromStore(sale, store.saleItems ?? [], store.users, store.customers) : null;
+}
+
+function attendanceTerminalFromStore(terminal: StoreAttendanceTerminal): AttendanceTerminal {
+  // The token hash NEVER leaves the store boundary.
+  return {
+    id: terminal.id,
+    tenantId: terminal.tenantId,
+    reference: terminal.reference,
+    isActive: terminal.isActive,
+    revokedAt: terminal.revokedAt ?? null,
+    createdAt: terminal.createdAt,
+  };
+}
+
+function attendanceRecordFromStore(
+  record: StoreAttendanceRecord,
+  users: StoreUser[],
+): AttendanceRecord {
+  return {
+    id: record.id,
+    tenantId: record.tenantId,
+    employeeId: record.employeeId,
+    employeeName: users.find((item) => item.id === record.employeeId)?.fullName ?? null,
+    employeeNumberSnapshot: record.employeeNumberSnapshot,
+    attendanceDate: record.attendanceDate,
+    checkInAt: record.checkInAt,
+    checkOutAt: record.checkOutAt ?? null,
+    status: record.status as AttendanceRecord['status'],
+    terminalReference: record.terminalReference ?? null,
+    createdAt: record.createdAt,
+  };
+}
+
+export async function listAttendanceTerminalsByTenant(tenantId: string) {
+  const store = await readStore();
+  return (store.attendanceTerminals ?? [])
+    .filter((terminal) => terminal.tenantId === tenantId)
+    .map(attendanceTerminalFromStore);
+}
+
+/** Internal: resolves the terminal WITH its token hash for verification. */
+export async function getAttendanceTerminalRecordByReference(reference: string) {
+  const store = await readStore();
+  return (store.attendanceTerminals ?? []).find((terminal) => terminal.reference === reference) ?? null;
+}
+
+export async function findUserByEmployeeNumber(tenantId: string, employeeNumber: string) {
+  const store = await readStore();
+  const user = store.users.find(
+    (item) => item.tenantId === tenantId && (item.employeeNumber ?? '').toUpperCase() === employeeNumber.toUpperCase(),
+  ) ?? null;
+  return user ? userFromStore(user) : null;
+}
+
+export async function listAttendanceRecordsByTenant(
+  tenantId: string,
+  filters: { attendanceDate?: string; employeeId?: string; status?: string; openOnly?: boolean } = {},
+) {
+  const store = await readStore();
+  return (store.attendanceRecords ?? [])
+    .filter((record) => record.tenantId === tenantId)
+    .filter((record) => !filters.attendanceDate || record.attendanceDate === filters.attendanceDate)
+    .filter((record) => !filters.employeeId || record.employeeId === filters.employeeId)
+    .filter((record) => !filters.status || record.status === filters.status)
+    .filter((record) => !filters.openOnly || !record.checkOutAt)
+    .sort((a, b) => b.checkInAt.localeCompare(a.checkInAt))
+    .map((record) => attendanceRecordFromStore(record, store.users));
+}
+
+export async function getOpenAttendanceRecord(tenantId: string, employeeId: string) {
+  const store = await readStore();
+  const record = (store.attendanceRecords ?? []).find(
+    (item) => item.tenantId === tenantId && item.employeeId === employeeId && !item.checkOutAt,
+  ) ?? null;
+  return record ? attendanceRecordFromStore(record, store.users) : null;
 }
 
 export async function listSubscriptionPackagesStore() {

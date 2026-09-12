@@ -59,6 +59,7 @@ export type User = {
   phone?: string;
   role: UserRole;
   isActive: boolean;
+  employeeNumber?: string | null;
   commissionType?: CommissionType;
   commissionValue?: number;
   commissionNotes?: string;
@@ -192,6 +193,31 @@ export type Expense = {
   description?: string;
   amount: number;
   expenseDate: string;
+};
+
+export type AttendanceStatus = 'CHECKED_IN' | 'CHECKED_OUT';
+
+export type AttendanceTerminal = {
+  id: string;
+  tenantId: string;
+  reference: string;
+  isActive: boolean;
+  revokedAt?: string | null;
+  createdAt: string;
+};
+
+export type AttendanceRecord = {
+  id: string;
+  tenantId: string;
+  employeeId: string;
+  employeeName?: string | null;
+  employeeNumberSnapshot: string;
+  attendanceDate: string;
+  checkInAt: string;
+  checkOutAt?: string | null;
+  status: AttendanceStatus;
+  terminalReference?: string | null;
+  createdAt: string;
 };
 
 export type OrderStatus =

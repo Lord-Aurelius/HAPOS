@@ -55,6 +55,8 @@ export type StoreUser = {
   phone?: string;
   password: StoredPassword;
   passwordUpdatedAt?: string | null;
+  /** Phase 2A reusable employee identity (terminal input). Null until assigned. */
+  employeeNumber?: string | null;
   isActive: boolean;
   commissionType?: CommissionType;
   commissionValue?: number;
@@ -396,6 +398,32 @@ export type StoreSale = {
   updatedAt: string;
 };
 
+export type StoreAttendanceTerminal = {
+  id: string;
+  tenantId: string;
+  reference: string;
+  tokenHash: string;
+  isActive: boolean;
+  revokedAt?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StoreAttendanceRecord = {
+  id: string;
+  tenantId: string;
+  employeeId: string;
+  employeeNumberSnapshot: string;
+  attendanceDate: string;
+  checkInAt: string;
+  checkOutAt?: string | null;
+  status: string;
+  terminalReference?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StoreState = {
   tenants: StoreTenant[];
   users: StoreUser[];
@@ -420,4 +448,9 @@ export type StoreState = {
   orderItems: StoreOrderItem[];
   sales: StoreSale[];
   saleItems: StoreSaleItem[];
+  // Phase 2A transitional projections (SQL-authoritative; see types above).
+  // Terminal rows carry tokenHash only — plaintext tokens are shown once at
+  // (re)generation and never persisted (both backends).
+  attendanceTerminals: StoreAttendanceTerminal[];
+  attendanceRecords: StoreAttendanceRecord[];
 };
