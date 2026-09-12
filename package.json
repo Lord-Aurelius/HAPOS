@@ -11,6 +11,7 @@
     "db:bootstrap": "node scripts/hapos-db-bootstrap.js",
     "test": "node --test tests/*.test.ts",
     "verify:migrations": "node scripts/verify-phase-migrations.js",
+    "verify:sql-staging": "node scripts/verify-sql-staging.js",
     "lint": "npm run typecheck",
     "typecheck": "tsc --noEmit"
   },
