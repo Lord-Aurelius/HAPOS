@@ -103,7 +103,7 @@ create table if not exists public.order_items (
     check (num_nonnulls(product_id, service_id) = 1),
   constraint order_items_type_matches_reference_check
     check ((item_type = 'PRODUCT') = (product_id is not null)),
-  constraint order_items_line_total_check
+  constraint order_items_line_total_math_check
     check (line_total = quantity * actual_unit_price),
   constraint order_items_tenant_id_id_unique unique (tenant_id, id)
 );
@@ -187,7 +187,7 @@ create table if not exists public.sale_items (
     check (num_nonnulls(product_id, service_id) = 1),
   constraint sale_items_type_matches_reference_check
     check ((item_type = 'PRODUCT') = (product_id is not null)),
-  constraint sale_items_line_total_check
+  constraint sale_items_line_total_math_check
     check (line_total = quantity * actual_unit_price),
   constraint sale_items_tenant_id_id_unique unique (tenant_id, id)
 );
