@@ -409,3 +409,68 @@ describe('concurrency', () => {
     assert.ok(outcomes.some((o) => o.duplicate));
   });
 });
+
+describe('commission snapshots', () => {
+  it("uses the seller's terms over the service defaults", () => {
+    const store = testStore();
+    store.users = [
+      { id: 'staff-1', tenantId: 'tenant-a', commissionType: 'percentage', commissionValue: 20 },
+      { id: 'admin-1', tenantId: 'tenant-a' },
+    ];
+    const { order } = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'STAFF',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+    }, { generateId });
+    submitOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    const { sale } = approveOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...ADMIN }, { generateId });
+    const item = store.saleItems.find((entry) => entry.saleId === sale.id);
+    // Staff 20% beats service 10%: 20% of 250 = 50.
+    assert.equal(item?.commissionType, 'percentage');
+    assert.equal(item?.commissionValue, 20);
+    assert.equal(item?.commissionAmount, 50);
+  });
+
+  it('later commission changes never rewrite a finalized sale', () => {
+    const store = testStore();
+    const { order } = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'STAFF',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+    }, { generateId });
+    submitOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    const { sale } = approveOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...ADMIN }, { generateId });
+
+    // Merchant reprices commission afterwards (service 10% -> 50%, staff terms added).
+    store.services.find((s) => s.id === 'svc-cut')!.commissionValue = 50;
+    store.users.find((u) => u.id === 'staff-1')!.commissionType = 'fixed';
+    store.users.find((u) => u.id === 'staff-1')!.commissionValue = 999;
+
+    const item = store.saleItems.find((entry) => entry.saleId === sale.id);
+    assert.equal(item?.commissionType, 'percentage');
+    assert.equal(item?.commissionValue, 10);
+    assert.equal(item?.commissionAmount, 25);
+  });
+});
+
+describe('sale tenant isolation', () => {
+  it("cannot approve, read back or void another tenant's sale", () => {
+    const store = testStore();
+    const { order } = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'STAFF',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+    }, { generateId });
+    submitOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    const { sale } = approveOrder(store, { tenantId: 'tenant-a', orderId: order.id, ...ADMIN }, { generateId });
+
+    assert.throws(
+      () => approveOrder(store, { tenantId: 'tenant-b', orderId: order.id, ...ADMIN }, { generateId }),
+      (error: unknown) => error instanceof CommerceError && error.code === 'unknown-item',
+    );
+    assert.throws(
+      () => voidSale(store, { tenantId: 'tenant-b', saleId: sale.id, ...ADMIN }, { generateId }),
+      (error: unknown) => error instanceof CommerceError && error.code === 'unknown-item',
+    );
+  });
+});

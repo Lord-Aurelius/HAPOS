@@ -58,7 +58,12 @@ export type OpsService = {
 };
 
 export type OpsCustomer = { id: string; tenantId: string };
-export type OpsUser = { id: string; tenantId: string | null };
+export type OpsUser = {
+  id: string;
+  tenantId: string | null;
+  commissionType?: 'fixed' | 'percentage';
+  commissionValue?: number;
+};
 
 export type OpsBomLink = {
   id: string;
@@ -255,6 +260,16 @@ export function createOrder(
     }
   }
 
+  // Staff commission terms override service defaults (legacy parity): the
+  // snapshot below must reflect the seller's terms at finalization time.
+  const seller = input.sellerId
+    ? store.users.find((item) => item.id === input.sellerId) ?? null
+    : null;
+  const staffCommission =
+    seller?.commissionType !== undefined
+      ? { commissionType: seller.commissionType, commissionValue: seller.commissionValue ?? 0 }
+      : null;
+
   const cart = buildOrderLines({
     tenantId: input.tenantId,
     products: store.products.map((product) => ({
@@ -277,7 +292,7 @@ export function createOrder(
       isActive: service.isActive,
     })),
     lines: input.lines,
-    staffCommission: null,
+    staffCommission,
   });
   assertClientTotal(cart.total, input.clientTotal);
 
