@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 
 import { requireSession } from '@/server/auth/demo-session';
 import { checkAttendanceRateLimit } from '@/server/auth/attendance-limit';
+import { getQrWrapKey } from '@/server/crypto/qr-wrap';
 import { AttendanceError, assertValidEmployeeNumber, normalizeEmployeeNumber } from '@/server/commerce/attendance';
 import {
   checkInEmployee,
@@ -138,6 +139,8 @@ export async function rotateAttendanceTerminalAction() {
     const rotated = rotateTerminal(
       attendanceStoreOf(store),
       { tenantId: tenant.id, createdBy: session.user.id, shopSlug: tenant.slug },
+      // Sealed copy enables later reprints when QR_WRAP_KEY is configured.
+      { wrapKey: getQrWrapKey() },
     );
     return { reference: rotated.terminal.reference, token: rotated.token };
   });

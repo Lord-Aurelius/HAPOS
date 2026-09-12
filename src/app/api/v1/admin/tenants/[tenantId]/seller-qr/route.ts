@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 
 import { requireSession } from '@/server/auth/demo-session';
 import { QrAccessError, checkQrTenantAccess } from '@/server/auth/qr-access';
-import { getTenantById } from '@/server/store';
+import { QrWrapError, getQrWrapKey, openBearer } from '@/server/crypto/qr-wrap';
+import { getSellerCredentialRecordByReference, getTenantById } from '@/server/store';
 import { buildSellerQrUrl } from '@/server/config/public-url';
 
 type RouteContext = {
@@ -41,13 +42,31 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const { searchParams } = new URL(request.url);
-  const bearer = searchParams.get('bearer') ?? '';
   const reference = searchParams.get('reference') ?? '';
-  if (!bearer || !reference) {
-    return NextResponse.json(
-      { error: 'Issue or rotate the seller credential to generate a fresh QR code.' },
-      { status: 400 },
-    );
+  if (!reference) {
+    return NextResponse.json({ error: 'reference is required.' }, { status: 400 });
+  }
+
+  // One-time ceremony bearer wins when supplied; otherwise rebuild the SAME
+  // active QR from the sealed copy (persistent printing). Either way the
+  // bearer only ever leaves inside this admin-gated QR image.
+  let bearer = searchParams.get('bearer') ?? '';
+  if (!bearer) {
+    const row = await getSellerCredentialRecordByReference(reference);
+    if (!row || row.tenantId !== tenant.id || row.status !== 'ACTIVE') {
+      return NextResponse.json({ error: 'No active seller QR for that reference.' }, { status: 404 });
+    }
+    try {
+      bearer = openBearer(row.bearerWrapped ?? null, getQrWrapKey());
+    } catch (error) {
+      if (error instanceof QrWrapError) {
+        return NextResponse.json(
+          { error: 'Print / Reissue the QR once to enable persistent printing.' },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
   }
 
   const format = searchParams.get('format') === 'png' ? 'png' : 'svg';

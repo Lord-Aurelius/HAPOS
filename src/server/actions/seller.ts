@@ -16,6 +16,7 @@ import {
   touchSellerCredentialUsed,
   verifySellerCredential,
 } from '@/server/commerce/seller-store';
+import { getQrWrapKey } from '@/server/crypto/qr-wrap';
 import {
   createOrder,
   finalizeApprovedOrder,
@@ -73,7 +74,8 @@ export async function issueSellerCredentialAction(formData: FormData) {
         tenantId: seller.tenantId ?? session.tenant!.id,
         sellerId: seller.id,
         createdBy: session.user.id,
-      });
+        // Sealed copy enables later reprints when QR_WRAP_KEY is configured.
+      }, { wrapKey: getQrWrapKey() });
     });
     revalidatePath('/app/settings/staff');
     redirect(
@@ -101,7 +103,7 @@ export async function rotateSellerCredentialAction(formData: FormData) {
         tenantId: seller.tenantId ?? session.tenant!.id,
         sellerId: seller.id,
         createdBy: session.user.id,
-      });
+      }, { wrapKey: getQrWrapKey() });
     });
     revalidatePath('/app/settings/staff');
     redirect(

@@ -25,6 +25,7 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
     return null;
   }
   const params = await searchParams;
+  const tenantId = session.tenant.id;
 
   const [users, credentials, sellerCredentials] = await Promise.all([
     listUsers(session.tenant.id),
@@ -262,6 +263,9 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
             .map((user) => {
               const credential = credentialBySeller.get(user.id);
               const isActive = credential?.status === 'ACTIVE';
+              const persistentQrHref = credential && isActive && credential.hasPersistentQr
+                ? `/api/v1/admin/tenants/${tenantId}/seller-qr?reference=${encodeURIComponent(credential.publicReference)}`
+                : null;
               return (
                 <div key={user.id} className="list-row">
                   <div>
@@ -271,6 +275,20 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                         ? `${isActive ? 'ACTIVE' : 'REVOKED'} · issued ${credential.issuedAt.slice(0, 10)} · last used ${credential.lastUsedAt ? credential.lastUsedAt.slice(0, 16).replace('T', ' ') : 'never'}${credential.revokedAt ? ` · revoked ${credential.revokedAt.slice(0, 10)}` : ''}`
                         : 'No QR credential'}
                     </div>
+                    {persistentQrHref ? (
+                      <div className="stack" style={{ marginTop: 8 }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`${persistentQrHref}&format=svg`} alt={`Seller QR code for ${user.fullName}`} style={{ maxWidth: 200 }} />
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <a className="button secondary" href={`${persistentQrHref}&format=png&download=1`}>
+                            Download PNG
+                          </a>
+                          <a className="button secondary" href={`${persistentQrHref}&format=svg&download=1`}>
+                            Download SVG
+                          </a>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {!credential ? (

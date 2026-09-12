@@ -412,6 +412,8 @@ export type StoreAttendanceTerminal = {
   tenantId: string;
   reference: string;
   tokenHash: string;
+  /** AES-GCM sealed token for persistent renders (null until keyed rotation). */
+  tokenWrapped?: string | null;
   isActive: boolean;
   revokedAt?: string | null;
   createdBy?: string | null;
@@ -439,6 +441,8 @@ export type StoreSellerCredential = {
   sellerId: string;
   publicReference: string;
   tokenHash: string;
+  /** AES-GCM sealed bearer for persistent renders (null until keyed rotation). */
+  bearerWrapped?: string | null;
   status: string;
   issuedAt: string;
   lastUsedAt?: string | null;

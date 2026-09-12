@@ -204,6 +204,8 @@ export type AttendanceTerminal = {
   isActive: boolean;
   revokedAt?: string | null;
   createdAt: string;
+  /** Non-secret metadata: whether a persistent QR render is available. */
+  hasPersistentQr?: boolean;
 };
 
 export type AttendanceRecord = {
@@ -235,6 +237,8 @@ export type SellerCredential = {
   expiresAt?: string | null;
   rotatedAt?: string | null;
   createdAt: string;
+  /** Non-secret metadata: whether a persistent QR render is available. */
+  hasPersistentQr?: boolean;
 };
 
 export type SaleAmendment = {

@@ -61,6 +61,10 @@ export default async function AttendanceAdminPage({ searchParams }: AttendancePa
     terminal && oneTimeToken && oneTimeReference
       ? `/api/v1/admin/tenants/${tenant.id}/attendance-qr?reference=${encodeURIComponent(oneTimeReference)}&token=${encodeURIComponent(oneTimeToken)}`
       : null;
+  const persistentQrHref =
+    terminal && terminal.isActive && terminal.hasPersistentQr && !qrBaseHref
+      ? `/api/v1/admin/tenants/${tenant.id}/attendance-qr?reference=${encodeURIComponent(terminal.reference)}`
+      : null;
 
   return (
     <>
@@ -108,6 +112,23 @@ export default async function AttendanceAdminPage({ searchParams }: AttendancePa
                   Download SVG
                 </a>
                 <a className="button secondary" href={`${qrBaseHref}&format=png&download=1`}>
+                  Download PNG
+                </a>
+              </div>
+            </div>
+          ) : persistentQrHref ? (
+            <div className="stack">
+              <p className="panel-copy">
+                Active QR — print or download it anytime. It stays valid until reissue, revocation
+                or expiration.
+              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`${persistentQrHref}&format=svg`} alt="Attendance terminal QR code" style={{ maxWidth: 320 }} />
+              <div className="hero-actions" style={{ marginTop: 0 }}>
+                <a className="button secondary" href={`${persistentQrHref}&format=svg&download=1`}>
+                  Download SVG
+                </a>
+                <a className="button secondary" href={`${persistentQrHref}&format=png&download=1`}>
                   Download PNG
                 </a>
               </div>

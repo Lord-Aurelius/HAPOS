@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 
 import { requireSession } from '@/server/auth/demo-session';
 import { QrAccessError, checkQrTenantAccess } from '@/server/auth/qr-access';
-import { getTenantById } from '@/server/store';
+import { QrWrapError, getQrWrapKey, openBearer } from '@/server/crypto/qr-wrap';
+import { getAttendanceTerminalRecordByReference, getTenantById } from '@/server/store';
 import { buildAttendanceTerminalUrl } from '@/server/config/public-url';
 
 type RouteContext = {
@@ -41,13 +42,30 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   const { searchParams } = new URL(request.url);
-  const token = searchParams.get('token') ?? '';
   const reference = searchParams.get('reference') ?? '';
-  if (!token || !reference) {
-    return NextResponse.json(
-      { error: 'Rotate the terminal to generate a fresh QR code.' },
-      { status: 400 },
-    );
+  if (!reference) {
+    return NextResponse.json({ error: 'reference is required.' }, { status: 400 });
+  }
+
+  // One-time ceremony token wins when supplied; otherwise rebuild the SAME
+  // active QR from the sealed copy (persistent printing).
+  let token = searchParams.get('token') ?? '';
+  if (!token) {
+    const row = await getAttendanceTerminalRecordByReference(reference);
+    if (!row || row.tenantId !== tenant.id || !row.isActive || row.revokedAt) {
+      return NextResponse.json({ error: 'No active attendance QR for that reference.' }, { status: 404 });
+    }
+    try {
+      token = openBearer(row.tokenWrapped ?? null, getQrWrapKey());
+    } catch (error) {
+      if (error instanceof QrWrapError) {
+        return NextResponse.json(
+          { error: 'Print / Reissue the QR once to enable persistent printing.' },
+          { status: 400 },
+        );
+      }
+      throw error;
+    }
   }
 
   const format = searchParams.get('format') === 'png' ? 'png' : 'svg';

@@ -1059,7 +1059,7 @@ export async function getSaleById(tenantId: string, saleId: string) {
 }
 
 function attendanceTerminalFromStore(terminal: StoreAttendanceTerminal): AttendanceTerminal {
-  // The token hash NEVER leaves the store boundary.
+  // The token hash AND sealed copy NEVER leave the store boundary.
   return {
     id: terminal.id,
     tenantId: terminal.tenantId,
@@ -1067,6 +1067,7 @@ function attendanceTerminalFromStore(terminal: StoreAttendanceTerminal): Attenda
     isActive: terminal.isActive,
     revokedAt: terminal.revokedAt ?? null,
     createdAt: terminal.createdAt,
+    hasPersistentQr: Boolean(terminal.tokenWrapped),
   };
 }
 
@@ -1134,7 +1135,7 @@ export async function getOpenAttendanceRecord(tenantId: string, employeeId: stri
 }
 
 function sellerCredentialFromStore(credential: StoreSellerCredential, users: StoreUser[]): SellerCredential {
-  // The token hash NEVER leaves the store boundary.
+  // The token hash AND sealed copy NEVER leave the store boundary.
   return {
     id: credential.id,
     tenantId: credential.tenantId,
@@ -1148,6 +1149,7 @@ function sellerCredentialFromStore(credential: StoreSellerCredential, users: Sto
     expiresAt: credential.expiresAt ?? null,
     rotatedAt: credential.rotatedAt ?? null,
     createdAt: credential.createdAt,
+    hasPersistentQr: Boolean(credential.bearerWrapped),
   };
 }
 
