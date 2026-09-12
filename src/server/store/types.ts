@@ -39,6 +39,8 @@ export type StoreTenant = {
   status: TenantStatus;
   suspensionReason?: string | null;
   loyaltyProgram?: StoreLoyaltyProgram | null;
+  /** Phase 2 merchant policy: customer bookings require review (default true). */
+  orderReviewRequired?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -294,6 +296,101 @@ export type StoreCustomerOrder = {
   createdAt: string;
 };
 
+// ── Phase 2 commerce entities (transitional file projection of
+// db/migrations/phase-02-orders-sales.sql; SQL-authoritative at cutover) ─────
+
+export type StoreOrderItem = {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  itemType: 'PRODUCT' | 'SERVICE';
+  productId?: string | null;
+  serviceId?: string | null;
+  quantity: number;
+  catalogUnitPrice: number;
+  actualUnitPrice: number;
+  lineTotal: number;
+  itemName: string;
+  itemSnapshot?: Record<string, unknown>;
+  commissionType?: 'fixed' | 'percentage';
+  commissionValue?: number;
+  commissionAmount?: number;
+  overrideReason?: string | null;
+  overrideBy?: string | null;
+  overrideAt?: string | null;
+  createdAt: string;
+};
+
+export type StoreOrder = {
+  id: string;
+  tenantId: string;
+  customerId?: string | null;
+  sellerId?: string | null;
+  status: string;
+  subtotal: number;
+  total: number;
+  currencyCode: string;
+  source: string;
+  notes?: string | null;
+  idempotencyKey?: string | null;
+  quotedAt?: string | null;
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  rejectedAt?: string | null;
+  rejectionReason?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StoreSaleItem = {
+  id: string;
+  tenantId: string;
+  saleId: string;
+  itemType: 'PRODUCT' | 'SERVICE';
+  productId?: string | null;
+  serviceId?: string | null;
+  quantity: number;
+  catalogUnitPrice: number;
+  actualUnitPrice: number;
+  lineTotal: number;
+  itemName: string;
+  itemSnapshot?: Record<string, unknown>;
+  commissionType?: 'fixed' | 'percentage';
+  commissionValue?: number;
+  commissionAmount?: number;
+  overrideReason?: string | null;
+  overrideBy?: string | null;
+  overrideAt?: string | null;
+  overrideHistoryUnknown?: boolean;
+  createdAt: string;
+};
+
+export type StoreSale = {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  customerId?: string | null;
+  sellerId?: string | null;
+  status: string;
+  subtotal: number;
+  total: number;
+  currencyCode: string;
+  idempotencyKey?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  completedAt?: string | null;
+  recordedBy?: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StoreState = {
   tenants: StoreTenant[];
   users: StoreUser[];
@@ -313,4 +410,9 @@ export type StoreState = {
   // Phase 1 transitional projections (SQL-authoritative; see types above).
   serviceProductLinks: StoreServiceProductLink[];
   inventoryMovements: StoreInventoryMovement[];
+  // Phase 2 transitional projections (SQL-authoritative; see types above).
+  orders: StoreOrder[];
+  orderItems: StoreOrderItem[];
+  sales: StoreSale[];
+  saleItems: StoreSaleItem[];
 };

@@ -194,6 +194,95 @@ export type Expense = {
   expenseDate: string;
 };
 
+export type OrderStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'PENDING_REVIEW'
+  | 'APPROVED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'REJECTED';
+
+export type SaleStatus = 'PENDING' | 'COMPLETED' | 'VOIDED';
+
+export type OrderItemType = 'PRODUCT' | 'SERVICE';
+
+export type OrderItem = {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  itemType: OrderItemType;
+  productId?: string | null;
+  serviceId?: string | null;
+  quantity: number;
+  catalogUnitPrice: number;
+  actualUnitPrice: number;
+  lineTotal: number;
+  itemName: string;
+  commissionType?: 'fixed' | 'percentage';
+  commissionValue?: number;
+  commissionAmount?: number;
+  overrideReason?: string | null;
+};
+
+export type Order = {
+  id: string;
+  tenantId: string;
+  customerId?: string | null;
+  customerName?: string | null;
+  sellerId?: string | null;
+  sellerName?: string | null;
+  status: OrderStatus;
+  subtotal: number;
+  total: number;
+  currencyCode: string;
+  source: string;
+  notes?: string | null;
+  items: OrderItem[];
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+};
+
+export type SaleItem = {
+  id: string;
+  tenantId: string;
+  saleId: string;
+  itemType: OrderItemType;
+  productId?: string | null;
+  serviceId?: string | null;
+  quantity: number;
+  catalogUnitPrice: number;
+  actualUnitPrice: number;
+  lineTotal: number;
+  itemName: string;
+  commissionType?: 'fixed' | 'percentage';
+  commissionValue?: number;
+  commissionAmount?: number;
+  overrideReason?: string | null;
+  overrideHistoryUnknown?: boolean;
+};
+
+export type Sale = {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  customerId?: string | null;
+  customerName?: string | null;
+  sellerId?: string | null;
+  sellerName?: string | null;
+  status: SaleStatus;
+  subtotal: number;
+  total: number;
+  currencyCode: string;
+  items: SaleItem[];
+  completedAt?: string | null;
+  voidedAt?: string | null;
+  voidReason?: string | null;
+  createdAt: string;
+};
+
 export type Subscription = {
   id: string;
   tenantId: string;

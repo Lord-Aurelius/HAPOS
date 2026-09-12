@@ -9,8 +9,12 @@ import type {
   Customer,
   CustomerAppSession,
   InventoryMovement,
+  Order,
+  OrderItem,
   Product,
   ProductUsage,
+  Sale,
+  SaleItem,
   Service,
   ServiceProductLink,
   ServiceRecord,
@@ -34,7 +38,11 @@ import type {
   StoreExpense,
   StoreInventoryMovement,
   StoreLoyaltyProgram,
+  StoreOrder,
+  StoreOrderItem,
   StoreProduct,
+  StoreSale,
+  StoreSaleItem,
   StoreService,
   StoreServiceProductLink,
   StoreServiceRecord,
@@ -392,6 +400,34 @@ function migrateStoreState(parsed: StoreState) {
   // Single implementation lives in commerce/inventory-store.ts.
   const catalogProjection = ensureCatalogProjection(parsed);
   changed = changed || catalogProjection.changed;
+
+  // Phase 2 commerce projection backfill (transitional; SQL-authoritative).
+  if (!Array.isArray(parsed.orders)) {
+    parsed.orders = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.orderItems)) {
+    parsed.orderItems = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.sales)) {
+    parsed.sales = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.saleItems)) {
+    parsed.saleItems = [];
+    changed = true;
+  }
+
+  for (const tenant of parsed.tenants) {
+    if (!('orderReviewRequired' in tenant)) {
+      tenant.orderReviewRequired = true;
+      changed = true;
+    }
+  }
 
   return { store: parsed, changed };
 }
@@ -811,6 +847,140 @@ export async function listInventoryMovementsByTenant(tenantId: string, productId
     .filter((movement) => movement.tenantId === tenantId && (!productId || movement.productId === productId))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map(inventoryMovementFromStore);
+}
+
+function orderItemFromStore(item: StoreOrderItem): OrderItem {
+  return {
+    id: item.id,
+    tenantId: item.tenantId,
+    orderId: item.orderId,
+    itemType: item.itemType,
+    productId: item.productId ?? null,
+    serviceId: item.serviceId ?? null,
+    quantity: item.quantity,
+    catalogUnitPrice: item.catalogUnitPrice,
+    actualUnitPrice: item.actualUnitPrice,
+    lineTotal: item.lineTotal,
+    itemName: item.itemName,
+    commissionType: item.commissionType ?? 'percentage',
+    commissionValue: item.commissionValue ?? 0,
+    commissionAmount: item.commissionAmount ?? 0,
+    overrideReason: item.overrideReason ?? null,
+  };
+}
+
+function orderFromStore(
+  order: StoreOrder,
+  items: StoreOrderItem[],
+  users: StoreUser[],
+  customers: StoreCustomer[],
+): Order {
+  return {
+    id: order.id,
+    tenantId: order.tenantId,
+    customerId: order.customerId ?? null,
+    customerName: order.customerId
+      ? customers.find((item) => item.id === order.customerId)?.name ?? null
+      : null,
+    sellerId: order.sellerId ?? null,
+    sellerName: order.sellerId
+      ? users.find((item) => item.id === order.sellerId)?.fullName ?? null
+      : null,
+    status: order.status as Order['status'],
+    subtotal: order.subtotal,
+    total: order.total,
+    currencyCode: order.currencyCode,
+    source: order.source,
+    notes: order.notes ?? null,
+    items: items
+      .filter((item) => item.orderId === order.id && item.tenantId === order.tenantId)
+      .map(orderItemFromStore),
+    submittedAt: order.submittedAt ?? null,
+    approvedAt: order.approvedAt ?? null,
+    completedAt: order.completedAt ?? null,
+    createdAt: order.createdAt,
+  };
+}
+
+function saleItemFromStore(item: StoreSaleItem): SaleItem {
+  return {
+    id: item.id,
+    tenantId: item.tenantId,
+    saleId: item.saleId,
+    itemType: item.itemType,
+    productId: item.productId ?? null,
+    serviceId: item.serviceId ?? null,
+    quantity: item.quantity,
+    catalogUnitPrice: item.catalogUnitPrice,
+    actualUnitPrice: item.actualUnitPrice,
+    lineTotal: item.lineTotal,
+    itemName: item.itemName,
+    commissionType: item.commissionType ?? 'percentage',
+    commissionValue: item.commissionValue ?? 0,
+    commissionAmount: item.commissionAmount ?? 0,
+    overrideReason: item.overrideReason ?? null,
+    overrideHistoryUnknown: item.overrideHistoryUnknown ?? false,
+  };
+}
+
+function saleFromStore(
+  sale: StoreSale,
+  items: StoreSaleItem[],
+  users: StoreUser[],
+  customers: StoreCustomer[],
+): Sale {
+  return {
+    id: sale.id,
+    tenantId: sale.tenantId,
+    orderId: sale.orderId,
+    customerId: sale.customerId ?? null,
+    customerName: sale.customerId
+      ? customers.find((item) => item.id === sale.customerId)?.name ?? null
+      : null,
+    sellerId: sale.sellerId ?? null,
+    sellerName: sale.sellerId
+      ? users.find((item) => item.id === sale.sellerId)?.fullName ?? null
+      : null,
+    status: sale.status as Sale['status'],
+    subtotal: sale.subtotal,
+    total: sale.total,
+    currencyCode: sale.currencyCode,
+    items: items
+      .filter((item) => item.saleId === sale.id && item.tenantId === sale.tenantId)
+      .map(saleItemFromStore),
+    completedAt: sale.completedAt ?? null,
+    voidedAt: sale.voidedAt ?? null,
+    voidReason: sale.voidReason ?? null,
+    createdAt: sale.createdAt,
+  };
+}
+
+export async function listOrdersByTenant(tenantId: string) {
+  const store = await readStore();
+  return (store.orders ?? [])
+    .filter((order) => order.tenantId === tenantId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((order) => orderFromStore(order, store.orderItems ?? [], store.users, store.customers));
+}
+
+export async function getOrderById(tenantId: string, orderId: string) {
+  const store = await readStore();
+  const order = (store.orders ?? []).find((item) => item.id === orderId && item.tenantId === tenantId) ?? null;
+  return order ? orderFromStore(order, store.orderItems ?? [], store.users, store.customers) : null;
+}
+
+export async function listSalesByTenant(tenantId: string) {
+  const store = await readStore();
+  return (store.sales ?? [])
+    .filter((sale) => sale.tenantId === tenantId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((sale) => saleFromStore(sale, store.saleItems ?? [], store.users, store.customers));
+}
+
+export async function getSaleById(tenantId: string, saleId: string) {
+  const store = await readStore();
+  const sale = (store.sales ?? []).find((item) => item.id === saleId && item.tenantId === tenantId) ?? null;
+  return sale ? saleFromStore(sale, store.saleItems ?? [], store.users, store.customers) : null;
 }
 
 export async function listSubscriptionPackagesStore() {

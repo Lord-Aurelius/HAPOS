@@ -463,5 +463,10 @@ export function createSeedStore(): StoreState {
     // Phase 1 transitional projections start empty (SQL-authoritative later).
     serviceProductLinks: [],
     inventoryMovements: [],
+    // Phase 2 transitional projections start empty (SQL-authoritative later).
+    orders: [],
+    orderItems: [],
+    sales: [],
+    saleItems: [],
   };
 }
