@@ -331,6 +331,8 @@ export type Sale = {
   subtotal: number;
   total: number;
   currencyCode: string;
+  /** Order source (SELLER_QR for QR-originated sales). Derived, not stored. */
+  source: string;
   items: SaleItem[];
   completedAt?: string | null;
   voidedAt?: string | null;

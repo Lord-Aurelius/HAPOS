@@ -996,6 +996,7 @@ function saleFromStore(
   items: StoreSaleItem[],
   users: StoreUser[],
   customers: StoreCustomer[],
+  orders?: StoreOrder[],
 ): Sale {
   return {
     id: sale.id,
@@ -1013,6 +1014,7 @@ function saleFromStore(
     subtotal: sale.subtotal,
     total: sale.total,
     currencyCode: sale.currencyCode,
+    source: orders?.find((item) => item.id === sale.orderId && item.tenantId === sale.tenantId)?.source ?? 'STAFF',
     items: items
       .filter((item) => item.saleId === sale.id && item.tenantId === sale.tenantId)
       .map(saleItemFromStore),
@@ -1043,13 +1045,13 @@ export async function listSalesByTenant(tenantId: string) {
   return (store.sales ?? [])
     .filter((sale) => sale.tenantId === tenantId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map((sale) => saleFromStore(sale, store.saleItems ?? [], store.users, store.customers));
+    .map((sale) => saleFromStore(sale, store.saleItems ?? [], store.users, store.customers, store.orders ?? []));
 }
 
 export async function getSaleById(tenantId: string, saleId: string) {
   const store = await readStore();
   const sale = (store.sales ?? []).find((item) => item.id === saleId && item.tenantId === tenantId) ?? null;
-  return sale ? saleFromStore(sale, store.saleItems ?? [], store.users, store.customers) : null;
+  return sale ? saleFromStore(sale, store.saleItems ?? [], store.users, store.customers, store.orders ?? []) : null;
 }
 
 function attendanceTerminalFromStore(terminal: StoreAttendanceTerminal): AttendanceTerminal {

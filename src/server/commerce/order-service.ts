@@ -197,6 +197,7 @@ function enrichSale(store: StoreState, saleId: string, tenantId: string): Sale {
     subtotal: sale.subtotal,
     total: sale.total,
     currencyCode: sale.currencyCode,
+    source: (store.orders ?? []).find((item) => item.id === sale.orderId && item.tenantId === tenantId)?.source ?? 'STAFF',
     items,
     completedAt: sale.completedAt ?? null,
     voidedAt: sale.voidedAt ?? null,
@@ -368,9 +369,9 @@ export async function voidCommerceSale(
   });
 }
 
-export async function listCommerceOrders(session: CommerceSession): Promise<Order[]> {
+export async function listCommerceOrders(session: CommerceSession, options: { ownOnly?: boolean } = {}): Promise<Order[]> {
   const orders = await listOrdersByTenant(session.tenantId);
-  if (session.userRole === 'staff') {
+  if (session.userRole === 'staff' || options.ownOnly) {
     return orders.filter((order) => order.sellerId === session.userId);
   }
   return orders;
@@ -387,9 +388,9 @@ export async function getCommerceOrder(session: CommerceSession, orderId: string
   return order;
 }
 
-export async function listCommerceSales(session: CommerceSession): Promise<Sale[]> {
+export async function listCommerceSales(session: CommerceSession, options: { ownOnly?: boolean } = {}): Promise<Sale[]> {
   const sales = await listSalesByTenant(session.tenantId);
-  if (session.userRole === 'staff') {
+  if (session.userRole === 'staff' || options.ownOnly) {
     return sales.filter((sale) => sale.sellerId === session.userId);
   }
   return sales;
