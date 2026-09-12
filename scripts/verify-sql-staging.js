@@ -88,7 +88,7 @@ async function main() {
 
   // ── apply migrations in order ──
   console.log('checking applied migrations...');
-  console.log('  (apply manually first, in order: db/schema.sql, phase-01, phase-02, phase-2a, phase-03)');
+  console.log('  (apply manually first, in order: db/schema.sql, phase-01, phase-02, phase-2a, phase-03, phase-03b)');
   const appliedTables = await admin.query(
     `select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','sale_items','attendance_records','seller_credentials','sale_amendments')`,
   );
@@ -288,6 +288,26 @@ async function main() {
     const rows = await q(`select previous_total, new_total from sale_amendments where sale_id=$1`, [ids.sale]);
     assert(rows.length === 1 && Number(rows[0].previous_total) === 4600, 'amendment audit missing');
     return 'attribution links + amendment audit persist';
+  });
+
+  await check('smoke', 'payment intent columns + vocabulary', async () => {
+    const cols = await q(`select table_name from information_schema.columns where table_name in ('orders','sales') and column_name in ('payment_method','customer_phone')`);
+    assert(cols.length === 4, `payment intent columns missing (${cols.length}/4)`);
+    await q(`insert into orders (tenant_id, status, subtotal, total, source, payment_method, customer_phone) values ($1,'PENDING_REVIEW',1000,1000,'SELLER_QR','MPESA','+254712345678') returning id`, [ids.tenant]);
+    let rejected = 0;
+    for (const [label, sql] of [
+      ['bad-method', `insert into orders (tenant_id, status, subtotal, total, source, payment_method) values ('${ids.tenant}','PENDING_REVIEW',1,1,'SELLER_QR','CRYPTO')`],
+      ['bad-phone', `insert into orders (tenant_id, status, subtotal, total, source, payment_method, customer_phone) values ('${ids.tenant}','PENDING_REVIEW',1,1,'SELLER_QR','MPESA','0712')`],
+    ]) {
+      try {
+        await q(sql);
+      } catch {
+        rejected += 1;
+      }
+      void label;
+    }
+    assert(rejected === 2, 'payment vocabulary not enforced');
+    return 'intent persists; method/phone vocabularies enforced';
   });
 
   // ── D. RLS (restricted role + app.* session vars) ──
