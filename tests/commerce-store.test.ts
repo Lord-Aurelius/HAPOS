@@ -547,3 +547,39 @@ describe('QR credential attribution', () => {
     assert.ok(outcomes.some((o) => o.duplicate));
   });
 });
+
+describe('M-Pesa payment intent (held for Phase 4)', () => {
+  it('holds unpaid orders for review with phone stored and nothing finalized', () => {
+    const store = testStore();
+    const { order } = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: false,
+      paymentMethod: 'MPESA', customerPhone: '+254712345678',
+    }, { generateId });
+    const { route } = submitOrder(store, {
+      tenantId: 'tenant-a', orderId: order.id, ...STAFF, orderReviewRequired: false, forceReview: true,
+    }, { generateId });
+    assert.equal(route, 'PENDING_REVIEW');
+    assert.equal(order.status, 'PENDING_REVIEW');
+    assert.equal(order.paymentMethod, 'MPESA');
+    assert.equal(order.customerPhone, '+254712345678');
+    // No sale, no stock movement, no success claim.
+    assert.equal(store.sales.length, 0);
+    assert.equal((store.inventoryMovements ?? []).length, 0);
+  });
+
+  it('cash orders are unaffected by the payment boundary', () => {
+    const store = testStore();
+    const { order } = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: false,
+      paymentMethod: 'CASH', customerPhone: null,
+    }, { generateId });
+    const { route } = submitOrder(store, {
+      tenantId: 'tenant-a', orderId: order.id, ...STAFF, orderReviewRequired: false,
+    }, { generateId });
+    assert.equal(route, 'AUTO_APPROVE');
+  });
+});

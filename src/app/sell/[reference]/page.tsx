@@ -26,6 +26,7 @@ function getErrorMessage(error?: string) {
     'override-reason-required': 'Price changes need a reason.',
     'insufficient-stock': 'Insufficient stock — the sale was blocked and nothing was deducted.',
     'rate-limited': 'Too many attempts. Wait a few minutes and try again.',
+    'invalid-phone': 'Enter a valid Kenyan M-Pesa number (e.g. 0712345678).',
   };
   return (error && messages[error]) || null;
 }
@@ -53,6 +54,8 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
   let receipt: {
     orderTotal: number;
     orderStatus: string;
+    paymentMethod: string | null;
+    customerPhone: string | null;
     saleTotal: number | null;
     lines: { name: string; quantity: number; lineTotal: number }[];
   } | null = null;
@@ -68,6 +71,8 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
       receipt = {
         orderTotal: order.total,
         orderStatus: order.status,
+        paymentMethod: order.paymentMethod ?? null,
+        customerPhone: order.customerPhone ?? null,
         saleTotal: sale ? sale.total : null,
         lines: items.map((item) => ({ name: item.itemName, quantity: item.quantity, lineTotal: item.lineTotal })),
       };
@@ -113,7 +118,11 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
             </div>
             <p className="muted">
               Total {formatCurrency(receipt.saleTotal ?? receipt.orderTotal, context.currencyCode)}
-              {receipt.saleTotal === null ? ' · waiting for admin review' : ''}
+              {receipt.saleTotal === null
+                ? receipt.paymentMethod === 'MPESA'
+                  ? ` · M-Pesa payment not yet enabled — order held for review, no payment collected${receipt.customerPhone ? ` (${receipt.customerPhone})` : ''}`
+                  : ' · waiting for admin review'
+                : ''}
             </p>
             <a className="button secondary" href={`/sell/${reference}?k=${encodeURIComponent(bearer)}`}>
               New sale
@@ -171,6 +180,23 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
             <div className="field">
               <label htmlFor="notes">Notes</label>
               <textarea id="notes" name="notes" />
+            </div>
+            <div className="field">
+              <span className="eyebrow">Payment method</span>
+              <div className="field-row">
+                <label>
+                  <input type="radio" name="paymentMethod" value="cash" defaultChecked /> Cash — completes
+                  immediately
+                </label>
+                <label>
+                  <input type="radio" name="paymentMethod" value="mpesa" /> M-Pesa — order is held for
+                  payment (Phase 4 integration not yet enabled; no payment is collected)
+                </label>
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="customerPhone">Customer M-Pesa number (required for M-Pesa, e.g. 0712345678)</label>
+              <input id="customerPhone" name="customerPhone" inputMode="tel" placeholder="07XXXXXXXX" />
             </div>
             <div className="hero-actions">
               <button type="submit" className="button">

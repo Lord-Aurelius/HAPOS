@@ -24,6 +24,7 @@ import {
 } from '@/server/commerce/commerce-store';
 import { CommerceError, type CartLineRequest } from '@/server/commerce/orders';
 import { InventoryError } from '@/server/commerce/inventory';
+import { SaleValidationError, parseKenyanPhoneInput } from '@/server/commerce/sale-validation';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
 import { readStore, updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
@@ -37,7 +38,12 @@ function commerceStoreOf(store: StoreState): CommerceStore {
 }
 
 function sellerErrorCode(error: unknown): string {
-  if (error instanceof SellerError || error instanceof CommerceError || error instanceof InventoryError) {
+  if (
+    error instanceof SellerError ||
+    error instanceof CommerceError ||
+    error instanceof InventoryError ||
+    error instanceof SaleValidationError
+  ) {
     return error.code;
   }
   if (error instanceof IdempotencyKeyError) {
@@ -162,9 +168,19 @@ export async function submitSellerQrOrderAction(formData: FormData) {
   }
 
   let key: string | null = null;
+  let paymentMethod: 'CASH' | 'MPESA' = 'CASH';
+  let customerPhone: string | null = null;
   try {
     assertSellerOperationAllowed('CREATE_ORDER');
     key = normalizeIdempotencyKey(formString(formData, 'idempotencyKey'));
+    // Phase 3 payment boundary: Cash completes today; M-Pesa records a
+    // validated phone intent and holds the order for Phase 4 (no STK call,
+    // no success record, no stock movement until payment exists).
+    paymentMethod = formString(formData, 'paymentMethod') === 'mpesa' ? 'MPESA' : 'CASH';
+    const phoneRaw = formString(formData, 'customerPhone');
+    if (paymentMethod === 'MPESA') {
+      customerPhone = parseKenyanPhoneInput(phoneRaw || null, 'customerPhone');
+    }
   } catch (error) {
     redirect(`/sell/${reference}?error=${sellerErrorCode(error)}`);
   }
@@ -201,6 +217,8 @@ export async function submitSellerQrOrderAction(formData: FormData) {
         creatorId: context.sellerId,
         orderReviewRequired: policy,
         sellerCredentialId: context.credentialId,
+        paymentMethod,
+        customerPhone,
       });
 
       if (created.duplicate) {
@@ -213,6 +231,7 @@ export async function submitSellerQrOrderAction(formData: FormData) {
         actorId: context.sellerId,
         actorRole: 'staff',
         orderReviewRequired: policy,
+        forceReview: paymentMethod === 'MPESA',
       });
 
       let finalizedSaleId: string | null = null;
