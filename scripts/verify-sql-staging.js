@@ -86,14 +86,14 @@ async function main() {
   const RUN = Date.now().toString(36);
   const ROLE = `hapos_verify_app_${RUN}`;
 
-  // ── check migrations are applied (never applied by this script) ──
+  // ── apply migrations in order ──
   console.log('checking applied migrations...');
-  console.log('  (apply manually first, in order: db/schema.sql, phase-01, phase-02, phase-2a)');
+  console.log('  (apply manually first, in order: db/schema.sql, phase-01, phase-02, phase-2a, phase-03)');
   const appliedTables = await admin.query(
-    `select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','sale_items','attendance_records')`,
+    `select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','sale_items','attendance_records','seller_credentials','sale_amendments')`,
   );
-  if (appliedTables.rows.length < 5) {
-    console.error(`Refusing: commerce tables missing (found ${appliedTables.rows.length}/5). Apply the migrations first.`);
+  if (appliedTables.rows.length < 7) {
+    console.error(`Refusing: commerce tables missing (found ${appliedTables.rows.length}/7). Apply the migrations first.`);
     process.exit(2);
   }
   console.log('  commerce tables present.');
@@ -103,8 +103,8 @@ async function main() {
   // ── B. metadata ──
   console.log('== metadata ==');
   await check('meta', 'new tables exist', async () => {
-    const rows = await q(`select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','order_items','sales','sale_items','attendance_terminals','attendance_records')`);
-    assert(rows.length === 8, `expected 8 tables, got ${rows.length}`);
+    const rows = await q(`select tablename from pg_tables where schemaname='public' and tablename in ('service_product_links','inventory_movements','orders','order_items','sales','sale_items','attendance_terminals','attendance_records','seller_credentials','sale_amendments')`);
+    assert(rows.length === 10, `expected 10 tables, got ${rows.length}`);
     return rows.map((r) => r.tablename).sort().join(',');
   });
 
@@ -150,17 +150,17 @@ async function main() {
   });
 
   await check('meta', 'RLS enabled+forced with policies', async () => {
-    const rows = await q(`select relname, relrowsecurity as enabled, relforcerowsecurity as forced from pg_class where relname in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records')`);
-    assert(rows.length === 8, 'tables missing');
+    const rows = await q(`select relname, relrowsecurity as enabled, relforcerowsecurity as forced from pg_class where relname in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records','seller_credentials','sale_amendments')`);
+    assert(rows.length === 10, 'tables missing');
     for (const row of rows) {
       assert(row.enabled && row.forced, `RLS not enforced on ${row.relname}`);
     }
-    const pols = await q(`select tablename, count(*)::int as n from pg_policies where schemaname='public' and tablename in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records') group by tablename`);
-    assert(pols.length === 8, `policies missing on some tables: ${JSON.stringify(pols)}`);
+    const pols = await q(`select tablename, count(*)::int as n from pg_policies where schemaname='public' and tablename in ('orders','order_items','sales','sale_items','inventory_movements','service_product_links','attendance_terminals','attendance_records','seller_credentials','sale_amendments') group by tablename`);
+    assert(pols.length === 10, `policies missing on some tables: ${JSON.stringify(pols)}`);
     for (const row of pols) {
       assert(row.n >= 4, `${row.tablename} has ${row.n} policies, expected >=4`);
     }
-    return '8 tables x enforced RLS x >=4 policies';
+    return '10 tables x enforced RLS x >=4 policies';
   });
 
   // ── C. smoke ──
@@ -257,6 +257,39 @@ async function main() {
     return 'open invariant holds; closed ok';
   });
 
+  await check('smoke', 'seller credentials: issue, single-active, revoke, reissue', async () => {
+    await q(`insert into seller_credentials (tenant_id, seller_id, public_reference, token_hash) values ($1,$2,'sel-verify-${RUN}','hash1')`, [ids.tenant, ids.staff]);
+    let blocked = false;
+    try {
+      await q(`insert into seller_credentials (tenant_id, seller_id, public_reference, token_hash) values ($1,$2,'sel-verify2-${RUN}','hash2')`, [ids.tenant, ids.staff]);
+    } catch (e) {
+      blocked = /unique|duplicate/i.test(e.message);
+    }
+    assert(blocked, 'second active credential NOT rejected');
+    await q(`update seller_credentials set status='REVOKED', revoked_at=now() where tenant_id=$1 and seller_id=$2 and status='ACTIVE'`, [ids.tenant, ids.staff]);
+    await q(`insert into seller_credentials (tenant_id, seller_id, public_reference, token_hash) values ($1,$2,'sel-verify3-${RUN}','hash3')`, [ids.tenant, ids.staff]);
+    let badStatus = false;
+    try {
+      await q(`insert into seller_credentials (tenant_id, seller_id, public_reference, token_hash, status) values ($1,$2,'sel-verify4-${RUN}','hash4','BOGUS')`, [ids.tenant, ids.staff]);
+    } catch (e) {
+      badStatus = /check|invalid/i.test(e.message);
+    }
+    assert(badStatus, 'bogus status NOT rejected');
+    return 'single-active enforced; revocation frees the slot';
+  });
+
+  await check('smoke', 'sale amendments + credential attribution columns', async () => {
+    const cols = await q(`select column_name from information_schema.columns where table_name in ('orders','sales') and column_name='seller_credential_id'`);
+    assert(cols.length === 2, 'seller_credential_id missing on orders/sales');
+    const cred = await q(`select id from seller_credentials where tenant_id=$1 and seller_id=$2 and status='ACTIVE'`, [ids.tenant, ids.staff]);
+    await q(`update orders set seller_credential_id=$2 where id=$1`, [ids.order, cred[0].id]);
+    await q(`update sales set seller_credential_id=$2 where id=$1`, [ids.sale, cred[0].id]);
+    await q(`insert into sale_amendments (tenant_id, sale_id, previous_total, new_total, field_changes, reason) values ($1,$2,4600,4400,'[]','verify discount')`, [ids.tenant, ids.sale]);
+    const rows = await q(`select previous_total, new_total from sale_amendments where sale_id=$1`, [ids.sale]);
+    assert(rows.length === 1 && Number(rows[0].previous_total) === 4600, 'amendment audit missing');
+    return 'attribution links + amendment audit persist';
+  });
+
   // ── D. RLS (restricted role + app.* session vars) ──
   console.log('== rls ==');
   const appPassword = crypto.randomBytes(16).toString('hex');
@@ -265,7 +298,7 @@ async function main() {
   await admin.query(`grant usage on schema public to ${ROLE}`);
   await admin.query(`grant usage on schema app to ${ROLE}`);
   await admin.query(`grant execute on all functions in schema app to ${ROLE}`);
-  for (const table of ['tenants', 'users', 'customers', 'services', 'products', 'service_product_links', 'inventory_movements', 'orders', 'order_items', 'sales', 'sale_items', 'attendance_terminals', 'attendance_records']) {
+  for (const table of ['tenants', 'users', 'customers', 'services', 'products', 'service_product_links', 'inventory_movements', 'orders', 'order_items', 'sales', 'sale_items', 'attendance_terminals', 'attendance_records', 'seller_credentials', 'sale_amendments']) {
     await admin.query(`grant select, insert, update on public.${table} to ${ROLE}`);
   }
   // Second tenant with its own rows for isolation probes (run-scoped slugs).
@@ -305,6 +338,8 @@ async function main() {
         ['sales', `select count(*)::int as n from sales`],
         ['movements', `select count(*)::int as n from inventory_movements`],
         ['attendance', `select count(*)::int as n from attendance_records`],
+        ['credentials', `select count(*)::int as n from seller_credentials`],
+        ['amendments', `select count(*)::int as n from sale_amendments`],
       ]) {
         out[label] = (await c.query(sql)).rows[0].n;
       }
@@ -312,7 +347,7 @@ async function main() {
       out.terminals = (await c.query(`select reference from attendance_terminals`)).rows.map((r) => r.reference);
       return out;
     });
-    for (const label of ['orders', 'sales', 'movements', 'attendance']) {
+    for (const label of ['orders', 'sales', 'movements', 'attendance', 'credentials', 'amendments']) {
       assert(counts[label] === 0, `tenant B saw ${counts[label]} rows in ${label}`);
     }
     assert(JSON.stringify(counts.terminals) === JSON.stringify([`att-other-${RUN}`]), `tenant B terminals wrong: ${JSON.stringify(counts.terminals)}`);

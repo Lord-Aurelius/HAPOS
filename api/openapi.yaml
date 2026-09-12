@@ -1198,6 +1198,28 @@ paths:
           description: QR image
         '400':
           $ref: '#/components/responses/BadRequest'
+  /v1/admin/tenants/{tenantId}/seller-qr:
+    get:
+      tags: [Super Admin]
+      summary: Render a seller QR code
+      description: Accessible to `shop_admin` (own tenant) and `super_admin`. Requires the one-time `bearer` from issuance/rotation plus `reference`. Payload resolves a transaction-only context (CREATE_ORDER + SUBMIT_ORDER); never interchangeable with attendance or booking QRs.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - in: query
+          name: reference
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: bearer
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: QR image
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/ai/chat:
     post:
       tags: [AI]
