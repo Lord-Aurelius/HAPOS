@@ -25,7 +25,7 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-export type QrWrapErrorCode = 'wrap-unavailable' | 'needs-reissue' | 'invalid-key';
+export type QrWrapErrorCode = 'wrap-unavailable' | 'needs-reissue' | 'invalid-key' | 'qr-not-found';
 
 export class QrWrapError extends Error {
   readonly code: QrWrapErrorCode;
@@ -128,4 +128,32 @@ export function resolveRenderBearer(source: QrRenderSource): string {
     return source.bearer;
   }
   return openBearer(source.sealed, source.wrapKey);
+}
+
+export type QrRenderRow = {
+  tenantId: string;
+  sealed?: string | null;
+};
+
+/**
+ * Persistent-render resolution shared by the seller and attendance QR
+ * routes: same active credential renders the same QR on every visit.
+ * - unknown reference, wrong tenant, or unusable row → qr-not-found (404),
+ * - explicit ceremony bearer wins when supplied,
+ * - otherwise the sealed copy opens (missing key/copy → needs-reissue/400).
+ */
+export function resolvePersistentQrBearer(input: {
+  row: QrRenderRow | null;
+  tenantId: string;
+  isUsable: boolean;
+  explicitBearer: string | null;
+  wrapKey: Buffer | null;
+}): string {
+  if (!input.row || input.row.tenantId !== input.tenantId || !input.isUsable) {
+    throw new QrWrapError('qr-not-found', 'No active QR for that reference.');
+  }
+  if (input.explicitBearer) {
+    return input.explicitBearer;
+  }
+  return openBearer(input.row.sealed ?? null, input.wrapKey);
 }

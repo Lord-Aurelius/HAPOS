@@ -293,6 +293,8 @@ async function main() {
   await check('smoke', 'payment intent columns + vocabulary', async () => {
     const cols = await q(`select table_name from information_schema.columns where table_name in ('orders','sales') and column_name in ('payment_method','customer_phone')`);
     assert(cols.length === 4, `payment intent columns missing (${cols.length}/4)`);
+    const wrapped = await q(`select table_name from information_schema.columns where ((table_name='seller_credentials' and column_name='bearer_wrapped') or (table_name='attendance_terminals' and column_name='token_wrapped'))`);
+    assert(wrapped.length === 2, 'sealed QR bearer columns missing');
     await q(`insert into orders (tenant_id, status, subtotal, total, source, payment_method, customer_phone) values ($1,'PENDING_REVIEW',1000,1000,'SELLER_QR','MPESA','+254712345678') returning id`, [ids.tenant]);
     let rejected = 0;
     for (const [label, sql] of [

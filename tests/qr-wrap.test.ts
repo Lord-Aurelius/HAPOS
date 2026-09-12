@@ -6,6 +6,7 @@ import {
   getQrWrapKey,
   openBearer,
   parseQrWrapKey,
+  resolvePersistentQrBearer,
   resolveRenderBearer,
   sealBearer,
 } from '../src/server/crypto/qr-wrap.ts';
@@ -72,5 +73,56 @@ describe('resolveRenderBearer', () => {
     assertWrapCode(() => resolveRenderBearer({ kind: 'explicit', bearer: '' }), 'needs-reissue');
     assertWrapCode(() => resolveRenderBearer({ kind: 'persistent', sealed: null, wrapKey: key }), 'needs-reissue');
     assertWrapCode(() => resolveRenderBearer({ kind: 'persistent', sealed: sealBearer(BEARER, key), wrapKey: null }), 'needs-reissue');
+  });
+});
+
+describe('resolvePersistentQrBearer (panel re-render contract)', () => {
+  const key = parseQrWrapKey(KEY_HEX);
+  const row = { tenantId: 'tenant-a', sealed: '' as string | null };
+
+  it('renders the SAME active credential on repeat visits', () => {
+    const sealed = sealBearer(BEARER, key);
+    const first = resolvePersistentQrBearer({
+      row: { ...row, sealed }, tenantId: 'tenant-a', isUsable: true, explicitBearer: null, wrapKey: key,
+    });
+    const second = resolvePersistentQrBearer({
+      row: { ...row, sealed }, tenantId: 'tenant-a', isUsable: true, explicitBearer: null, wrapKey: key,
+    });
+    assert.equal(first, BEARER);
+    assert.equal(second, BEARER);
+  });
+
+  it('prefers the one-time ceremony bearer and isolates tenants', () => {
+    assert.equal(
+      resolvePersistentQrBearer({
+        row, tenantId: 'tenant-a', isUsable: true, explicitBearer: BEARER, wrapKey: null,
+      }),
+      BEARER,
+    );
+    assertWrapCode(
+      () => resolvePersistentQrBearer({
+        row, tenantId: 'tenant-b', isUsable: true, explicitBearer: null, wrapKey: key,
+      }),
+      'qr-not-found',
+    );
+    assertWrapCode(
+      () => resolvePersistentQrBearer({ row: null, tenantId: 'tenant-a', isUsable: true, explicitBearer: null, wrapKey: key }),
+      'qr-not-found',
+    );
+  });
+
+  it('revoked rows and missing sealed copies fail safely', () => {
+    assertWrapCode(
+      () => resolvePersistentQrBearer({
+        row, tenantId: 'tenant-a', isUsable: false, explicitBearer: null, wrapKey: key,
+      }),
+      'qr-not-found',
+    );
+    assertWrapCode(
+      () => resolvePersistentQrBearer({
+        row: { ...row, sealed: null }, tenantId: 'tenant-a', isUsable: true, explicitBearer: null, wrapKey: key,
+      }),
+      'needs-reissue',
+    );
   });
 });
