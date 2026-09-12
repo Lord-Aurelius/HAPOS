@@ -1,7 +1,7 @@
 import { apiBadRequest, apiOk } from '@/server/http/api';
 import { requireSession } from '@/server/auth/demo-session';
 import { cancelCommerceOrder } from '@/server/commerce/order-service';
-import { serviceErrorResponse, toCommerceSession } from '@/app/api/v1/orders/route';
+import { serviceErrorResponse, toCommerceSession } from '@/server/http/commerce-api';
 
 type RouteProps = {
   params: Promise<{ orderId: string }>;

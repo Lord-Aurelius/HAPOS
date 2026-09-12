@@ -1,7 +1,7 @@
 import { apiBadRequest, apiOk } from '@/server/http/api';
 import { requireSession } from '@/server/auth/demo-session';
 import { getCommerceSale } from '@/server/commerce/order-service';
-import { toCommerceSession } from '@/app/api/v1/orders/route';
+import { toCommerceSession } from '@/server/http/commerce-api';
 
 type RouteProps = {
   params: Promise<{ saleId: string }>;
