@@ -54,6 +54,9 @@ import type {
 } from '@/server/commerce/repository';
 import { readStore, updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
+import { voidServiceRecord } from '@/server/store/service-records';
+import { orderFromStore, saleFromStore } from '@/server/store/index';
+import type { Order as OrderView, Sale as SaleView } from '@/lib/types';
 
 function asCommerceStore(store: StoreState): CommerceStore {
   return store as unknown as CommerceStore;
@@ -209,7 +212,22 @@ export class FileCommerceRepository implements CommerceRepository {
     ctx: OpContext = {},
   ) {
     void ctx;
-    return updateStore((store) => voidSaleOp(asCommerceStore(store), input));
+    return updateStore((store) => {
+      const result = voidSaleOp(asCommerceStore(store), input);
+      // Co-written legacy rows follow the engine void (same mutator),
+      // including linked-booking restoration inside voidServiceRecord.
+      for (const record of store.serviceRecords) {
+        if (record.tenantId === input.tenantId && record.commerceSaleId === result.sale.id && !record.voidedAt) {
+          voidServiceRecord(store, {
+            tenantId: input.tenantId,
+            recordId: record.id,
+            userId: input.actorId,
+            reason: input.reason?.trim() || 'Sale voided.',
+          });
+        }
+      }
+      return result;
+    });
   }
 
   async getOrderWithItems(tenantId: string, orderId: string) {
@@ -531,7 +549,15 @@ export class FileCommerceRepository implements CommerceRepository {
   async verifySellerCredential(tenantId: string, reference: unknown, bearer: unknown, ctx: OpContext = {}) {
     void ctx;
     const store = await readStore();
-    return verifySellerCredentialOp(asSellerStore(store), { tenantId, reference, bearer });
+    const context = verifySellerCredentialOp(asSellerStore(store), { tenantId, reference, bearer });
+    const seller = store.users.find((item) => item.id === context.sellerId) ?? null;
+    return { ...context, sellerName: seller?.fullName ?? null };
+  }
+
+  async resolveSellerCredentialTenant(reference: string) {
+    const store = await readStore();
+    const row = (store.sellerCredentials ?? []).find((item) => item.publicReference === reference) ?? null;
+    return row ? row.tenantId : null;
   }
 
   async touchSellerCredentialUsed(tenantId: string, credentialId: string, ctx: OpContext = {}) {
@@ -539,6 +565,38 @@ export class FileCommerceRepository implements CommerceRepository {
     await updateStore((store) => {
       touchSellerCredentialUsed(asSellerStore(store), { tenantId, credentialId });
     });
+  }
+
+  async getOrderView(tenantId: string, orderId: string): Promise<OrderView | null> {
+    const store = await readStore();
+    const order = (store.orders ?? []).find((item) => item.id === orderId && item.tenantId === tenantId) ?? null;
+    return order ? orderFromStore(order, store.orderItems ?? [], store.users, store.customers) : null;
+  }
+
+  async getSaleView(tenantId: string, saleId: string): Promise<SaleView | null> {
+    const store = await readStore();
+    const sale = (store.sales ?? []).find((item) => item.id === saleId && item.tenantId === tenantId) ?? null;
+    return sale
+      ? saleFromStore(sale, store.saleItems ?? [], store.users, store.customers, store.orders ?? [])
+      : null;
+  }
+
+  async listOrderViews(tenantId: string, filters: { sellerId?: string } = {}): Promise<OrderView[]> {
+    const store = await readStore();
+    return (store.orders ?? [])
+      .filter((item) => item.tenantId === tenantId)
+      .filter((item) => !filters.sellerId || item.sellerId === filters.sellerId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((order) => orderFromStore(order, store.orderItems ?? [], store.users, store.customers));
+  }
+
+  async listSaleViews(tenantId: string, filters: { sellerId?: string } = {}): Promise<SaleView[]> {
+    const store = await readStore();
+    return (store.sales ?? [])
+      .filter((item) => item.tenantId === tenantId)
+      .filter((item) => !filters.sellerId || item.sellerId === filters.sellerId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((sale) => saleFromStore(sale, store.saleItems ?? [], store.users, store.customers, store.orders ?? []));
   }
 
   async getSellerSales(tenantId: string, sellerId: string) {

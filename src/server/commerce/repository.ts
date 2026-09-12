@@ -27,6 +27,12 @@ import type {
   OpsSale,
   OpsSaleItem,
 } from './commerce-store.ts';
+import type {
+  Order as OrderView,
+  OrderItem as OrderItemView,
+  Sale as SaleView,
+  SaleItem as SaleItemView,
+} from '@/lib/types';
 import type { InventoryMovementType } from './inventory.ts';
 import type { PaymentMethod, PaymentProvider, PaymentStatus } from './payments.ts';
 
@@ -105,6 +111,7 @@ export type OpsSellerContext = {
   sellerId: string;
   credentialId: string;
   publicReference: string;
+  sellerName?: string | null;
 };
 
 export type CreatePaymentInput = {
@@ -252,27 +259,16 @@ export interface CommerceRepository {
   ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment }>;
   getPaymentsByOrder(tenantId: string, orderId: string): Promise<OpsPayment[]>;
   markPaymentRecovery(tenantId: string, paymentId: string, reason: string, ctx?: OpContext): Promise<OpsPayment>;
-  /**
-   * Atomic paid-order completion: order APPROVED (if needed) + sale
-   * finalized with stock + payment linked. On stock failure the payment is
-   * flagged needs_recovery and the outcome reports it (never partial).
-   */
-  completePaidOrder(
-    input: { tenantId: string; orderId: string; paymentId: string; actorId: string },
-    ctx?: OpContext,
-  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment; outcome: 'completed' | 'needs-recovery' }>;
-  /** Retry completion for a SUCCESS payment flagged needs_recovery. */
-  recoverPaidOrder(
-    input: { tenantId: string; paymentId: string; actorId: string },
-    ctx?: OpContext,
-  ): Promise<{ order: OpsOrder; sale: OpsSale; payment: OpsPayment }>;
+  // ── enriched views (presentation; names resolved adapter-side) ──
+  getOrderView(tenantId: string, orderId: string): Promise<OrderView | null>;
+  getSaleView(tenantId: string, saleId: string): Promise<SaleView | null>;
+  listOrderViews(tenantId: string, filters?: { sellerId?: string }): Promise<OrderView[]>;
+  listSaleViews(tenantId: string, filters?: { sellerId?: string }): Promise<SaleView[]>;
   // ── credentials / reads ──
   verifySellerCredential(tenantId: string, reference: unknown, bearer: unknown, ctx?: OpContext): Promise<OpsSellerContext>;
   touchSellerCredentialUsed(tenantId: string, credentialId: string, ctx?: OpContext): Promise<void>;
-
-  // ── credentials / reads ──
-  verifySellerCredential(tenantId: string, reference: unknown, bearer: unknown, ctx?: OpContext): Promise<OpsSellerContext>;
-  touchSellerCredentialUsed(tenantId: string, credentialId: string, ctx?: OpContext): Promise<void>;
+  /** Resolve the owning tenant of a credential reference (public QR entry). */
+  resolveSellerCredentialTenant(reference: string): Promise<string | null>;
   getSellerSales(tenantId: string, sellerId: string): Promise<{ orders: OpsOrder[]; sales: OpsSale[] }>;
   getAdminOrders(tenantId: string): Promise<OpsOrder[]>;
   listPayments(tenantId: string, filters?: { orderId?: string; status?: PaymentStatus; needsRecovery?: boolean }): Promise<OpsPayment[]>;

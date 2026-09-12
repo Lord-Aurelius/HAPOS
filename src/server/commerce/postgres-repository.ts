@@ -62,6 +62,12 @@ import type {
   PostMovementInput,
   TransitionPaymentInput,
 } from './repository.ts';
+import type {
+  Order as OrderView,
+  OrderItem as OrderItemView,
+  Sale as SaleView,
+  SaleItem as SaleItemView,
+} from '@/lib/types';
 import type { ActorRole } from './commerce-store.ts';
 
 function nowISO(ctx: OpContext): string {
@@ -1279,7 +1285,7 @@ export class PostgresCommerceRepository implements CommerceRepository {
     if (credential.expires_at && Date.parse(credential.expires_at as string) <= Date.now()) {
       throw new SellerError('credential-expired', 'This seller QR code has expired. Ask an admin for a new one.');
     }
-    const seller = await this.pool.query(`select tenant_id, is_active from users where id = $1`, [credential.seller_id]);
+    const seller = await this.pool.query(`select tenant_id, is_active, full_name from users where id = $1`, [credential.seller_id]);
     const sellerRow = seller.rows[0] as Record<string, unknown> | undefined;
     if (!sellerRow || sellerRow.tenant_id !== tenantId || !sellerRow.is_active) {
       throw new SellerError('inactive-seller', 'That seller account is inactive.');
@@ -1289,6 +1295,7 @@ export class PostgresCommerceRepository implements CommerceRepository {
       sellerId: credential.seller_id as string,
       credentialId: credential.id as string,
       publicReference: credential.public_reference as string,
+      sellerName: (sellerRow.full_name as string | null) ?? null,
     };
   }
 
@@ -1296,6 +1303,227 @@ export class PostgresCommerceRepository implements CommerceRepository {
     await this.pool.query(`update seller_credentials set last_used_at = now(), updated_at = now() where tenant_id = $1 and id = $2`, [
       tenantId, credentialId,
     ]);
+  }
+
+  async resolveSellerCredentialTenant(reference: string) {
+    const { rows } = await this.pool.query(`select tenant_id from seller_credentials where public_reference = $1`, [reference]);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return (row?.tenant_id as string | null) ?? null;
+  }
+
+  async getOrderView(tenantId: string, orderId: string): Promise<OrderView | null> {
+    const found = await this.getOrderWithItems(tenantId, orderId);
+    if (!found) {
+      return null;
+    }
+    const names = await this.pool.query(
+      `select (select full_name from users where id = $2) as seller_name,
+              (select name from customers where id = $3) as customer_name`,
+      [tenantId, found.order.sellerId, found.order.customerId],
+    );
+    const namesRow = (names.rows[0] ?? {}) as Record<string, unknown>;
+    return {
+      id: found.order.id,
+      tenantId: found.order.tenantId,
+      customerId: found.order.customerId,
+      customerName: (namesRow.customer_name as string | null) ?? null,
+      sellerId: found.order.sellerId,
+      sellerName: (namesRow.seller_name as string | null) ?? null,
+      status: found.order.status as OrderView['status'],
+      subtotal: found.order.subtotal,
+      total: found.order.total,
+      currencyCode: found.order.currencyCode,
+      source: found.order.source,
+      notes: null,
+      items: found.items.map((item): OrderItemView => ({
+        id: item.id,
+        tenantId: item.tenantId,
+        orderId: item.orderId,
+        itemType: item.itemType,
+        productId: item.productId,
+        serviceId: item.serviceId,
+        quantity: item.quantity,
+        catalogUnitPrice: item.catalogUnitPrice,
+        actualUnitPrice: item.actualUnitPrice,
+        lineTotal: item.lineTotal,
+        itemName: item.itemName,
+        commissionType: item.commissionType,
+        commissionValue: item.commissionValue,
+        commissionAmount: item.commissionAmount,
+        overrideReason: item.overrideReason,
+      })),
+      submittedAt: found.order.submittedAt,
+      approvedAt: found.order.approvedAt,
+      completedAt: found.order.completedAt,
+      createdAt: found.order.createdAt,
+      sellerCredentialId: found.order.sellerCredentialId,
+    };
+  }
+
+  async getSaleView(tenantId: string, saleId: string): Promise<SaleView | null> {
+    const found = await this.getSaleWithItems(tenantId, saleId);
+    if (!found) {
+      return null;
+    }
+    const names = await this.pool.query(
+      `select (select full_name from users where id = $2) as seller_name,
+              (select name from customers where id = $3) as customer_name,
+              (select source from orders where tenant_id = $1 and id = $4) as source`,
+      [tenantId, found.sale.sellerId, found.sale.customerId, found.sale.orderId],
+    );
+    const namesRow = (names.rows[0] ?? {}) as Record<string, unknown>;
+    return {
+      id: found.sale.id,
+      tenantId: found.sale.tenantId,
+      orderId: found.sale.orderId,
+      customerId: found.sale.customerId,
+      customerName: (namesRow.customer_name as string | null) ?? null,
+      sellerId: found.sale.sellerId,
+      sellerName: (namesRow.seller_name as string | null) ?? null,
+      status: found.sale.status as SaleView['status'],
+      subtotal: found.sale.subtotal,
+      total: found.sale.total,
+      currencyCode: found.sale.currencyCode,
+      source: (namesRow.source as string | null) ?? 'STAFF',
+      items: found.items.map((item): SaleItemView => ({
+        id: item.id,
+        tenantId: item.tenantId,
+        saleId: item.saleId,
+        itemType: item.itemType,
+        productId: item.productId,
+        serviceId: item.serviceId,
+        quantity: item.quantity,
+        catalogUnitPrice: item.catalogUnitPrice,
+        actualUnitPrice: item.actualUnitPrice,
+        lineTotal: item.lineTotal,
+        itemName: item.itemName,
+        commissionType: item.commissionType,
+        commissionValue: item.commissionValue,
+        commissionAmount: item.commissionAmount,
+        overrideReason: item.overrideReason,
+        overrideHistoryUnknown: item.overrideHistoryUnknown,
+      })),
+      completedAt: found.sale.completedAt,
+      voidedAt: found.sale.voidedAt,
+      voidReason: found.sale.voidReason,
+      createdAt: found.sale.createdAt,
+      sellerCredentialId: found.sale.sellerCredentialId,
+      paymentMethod: found.sale.paymentMethod,
+      customerPhone: found.sale.customerPhone,
+    };
+  }
+
+  async listOrderViews(tenantId: string, filters: { sellerId?: string } = {}): Promise<OrderView[]> {
+    const conditions = [`tenant_id = $1`];
+    const params: unknown[] = [tenantId];
+    if (filters.sellerId) {
+      conditions.push(`seller_id = $${params.length + 1}`);
+      params.push(filters.sellerId);
+    }
+    const { rows } = await this.pool.query(
+      `select o.*, cu.name as customer_name, u.full_name as seller_name
+       from orders o left join customers cu on cu.tenant_id = o.tenant_id and cu.id = o.customer_id
+       left join users u on u.tenant_id = o.tenant_id and u.id = o.seller_id
+       where ${conditions.join(' and ')} order by o.created_at desc`,
+      params,
+    );
+    const views: OrderView[] = [];
+    for (const row of rows) {
+      const record = row as Record<string, unknown>;
+      const items = await this.pool.query(`select * from order_items where tenant_id = $1 and order_id = $2 order by created_at`, [
+        tenantId, record.id as string,
+      ]);
+      const order = mapOrderRow(record);
+      views.push({
+        id: order.id,
+        tenantId: order.tenantId,
+        customerId: order.customerId,
+        customerName: (record.customer_name as string | null) ?? null,
+        sellerId: order.sellerId,
+        sellerName: (record.seller_name as string | null) ?? null,
+        status: order.status as OrderView['status'],
+        subtotal: order.subtotal,
+        total: order.total,
+        currencyCode: order.currencyCode,
+        source: order.source,
+        notes: null,
+        items: items.rows.map((item) => {
+          const mapped = mapOrderItemRow(item as Record<string, unknown>);
+          return {
+            id: mapped.id, tenantId: mapped.tenantId, orderId: mapped.orderId, itemType: mapped.itemType,
+            productId: mapped.productId, serviceId: mapped.serviceId, quantity: mapped.quantity,
+            catalogUnitPrice: mapped.catalogUnitPrice, actualUnitPrice: mapped.actualUnitPrice,
+            lineTotal: mapped.lineTotal, itemName: mapped.itemName, commissionType: mapped.commissionType,
+            commissionValue: mapped.commissionValue, commissionAmount: mapped.commissionAmount,
+            overrideReason: mapped.overrideReason,
+          } as OrderItemView;
+        }),
+        submittedAt: order.submittedAt,
+        approvedAt: order.approvedAt,
+        completedAt: order.completedAt,
+        createdAt: order.createdAt,
+        sellerCredentialId: order.sellerCredentialId,
+      });
+    }
+    return views;
+  }
+
+  async listSaleViews(tenantId: string, filters: { sellerId?: string } = {}): Promise<SaleView[]> {
+    const conditions = [`s.tenant_id = $1`];
+    const params: unknown[] = [tenantId];
+    if (filters.sellerId) {
+      conditions.push(`s.seller_id = $${params.length + 1}`);
+      params.push(filters.sellerId);
+    }
+    const { rows } = await this.pool.query(
+      `select s.*, cu.name as customer_name, u.full_name as seller_name,
+              (select source from orders o where o.tenant_id = s.tenant_id and o.id = s.order_id) as source
+       from sales s left join customers cu on cu.tenant_id = s.tenant_id and cu.id = s.customer_id
+       left join users u on u.tenant_id = s.tenant_id and u.id = s.seller_id
+       where ${conditions.join(' and ')} order by s.created_at desc`,
+      params,
+    );
+    const views: SaleView[] = [];
+    for (const row of rows) {
+      const record = row as Record<string, unknown>;
+      const items = await this.pool.query(`select * from sale_items where tenant_id = $1 and sale_id = $2 order by created_at`, [
+        tenantId, record.id as string,
+      ]);
+      const sale = mapSaleRow(record);
+      views.push({
+        id: sale.id,
+        tenantId: sale.tenantId,
+        orderId: sale.orderId,
+        customerId: sale.customerId,
+        customerName: (record.customer_name as string | null) ?? null,
+        sellerId: sale.sellerId,
+        sellerName: (record.seller_name as string | null) ?? null,
+        status: sale.status as SaleView['status'],
+        subtotal: sale.subtotal,
+        total: sale.total,
+        currencyCode: sale.currencyCode,
+        source: (record.source as string | null) ?? 'STAFF',
+        items: items.rows.map((item) => {
+          const mapped = mapSaleItemRow(item as Record<string, unknown>);
+          return {
+            id: mapped.id, tenantId: mapped.tenantId, saleId: mapped.saleId, itemType: mapped.itemType,
+            productId: mapped.productId, serviceId: mapped.serviceId, quantity: mapped.quantity,
+            catalogUnitPrice: mapped.catalogUnitPrice, actualUnitPrice: mapped.actualUnitPrice,
+            lineTotal: mapped.lineTotal, itemName: mapped.itemName, commissionType: mapped.commissionType,
+            commissionValue: mapped.commissionValue, commissionAmount: mapped.commissionAmount,
+            overrideReason: mapped.overrideReason, overrideHistoryUnknown: mapped.overrideHistoryUnknown,
+          } as SaleItemView;
+        }),
+        completedAt: sale.completedAt,
+        voidedAt: sale.voidedAt,
+        voidReason: sale.voidReason,
+        createdAt: sale.createdAt,
+        sellerCredentialId: sale.sellerCredentialId,
+        paymentMethod: sale.paymentMethod,
+        customerPhone: sale.customerPhone,
+      });
+    }
+    return views;
   }
 
   async getSellerSales(tenantId: string, sellerId: string) {

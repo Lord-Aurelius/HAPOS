@@ -1,31 +1,24 @@
 /**
- * Session-bound commerce service (Phase 2, unit 5).
+ * Session-bound commerce service (Phase 4: repository cutover).
  *
- * Single bridge between persistence ops (`commerce-store.ts`) and all
- * surfaces (server actions + REST routes). Views are built inside the
- * mutator (the `readStore` cache can lag `updateStore` within one request).
+ * Single bridge between the CommerceRepository interface and all surfaces
+ * (server actions + REST routes). Works identically in file mode (file
+ * adapter) and SQL mode (relational adapter): backend differences live
+ * below this layer. Legacy salon flows in hapos.ts still use file ops
+ * directly and are documented as remaining transitional.
  */
 
-import type { Order, OrderItem, Sale, SaleItem } from '@/lib/types';
+import type { Order, Sale } from '@/lib/types';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
 import { CartFormError } from '@/server/commerce/cart-form';
-import {
-  approveOrder,
-  cancelOrder,
-  createOrder,
-  finalizeApprovedOrder,
-  rejectOrder,
-  submitOrder,
-  voidSale,
-  type ActorRole,
-  type CommerceStore,
-} from '@/server/commerce/commerce-store';
 import { CommerceError, type CartLineRequest, type OrderSource } from '@/server/commerce/orders';
 import { InventoryError } from '@/server/commerce/inventory';
 import { SaleValidationError } from '@/server/commerce/sale-validation';
-import { getOrderById, getSaleById, listOrdersByTenant, listSalesByTenant, readStore, updateStore } from '@/server/store';
-import { voidServiceRecord } from '@/server/store/service-records';
-import type { StoreState } from '@/server/store/types';
+import { PaymentError } from '@/server/commerce/payments';
+import { GatewayError } from '@/server/payments/gateway';
+import { recordCashPayment } from '@/server/payments/payment-service';
+import { getCommerceRepository } from '@/server/commerce/repository-select';
+import type { ActorRole } from '@/server/commerce/commerce-store';
 
 export type CommerceSession = {
   tenantId: string;
@@ -34,7 +27,7 @@ export type CommerceSession = {
 };
 
 export type ServiceError = {
-  status: 400 | 403 | 404;
+  status: 400 | 401 | 403 | 404 | 502 | 503 | 504;
   code: string;
   message: string;
 };
@@ -60,6 +53,24 @@ export function toServiceError(error: unknown): ServiceError {
   }
   if (error instanceof IdempotencyKeyError) {
     return { status: 400, code: 'invalid-idempotency-key', message: error.message };
+  }
+  if (error instanceof PaymentError) {
+    if (error.code === 'unknown-payment') {
+      return { status: 404, code: error.code, message: error.message };
+    }
+    return { status: 400, code: error.code, message: error.message };
+  }
+  if (error instanceof GatewayError) {
+    if (error.code === 'callback-unauthenticated') {
+      return { status: 401, code: error.code, message: error.message };
+    }
+    if (error.code === 'gateway-timeout') {
+      return { status: 504, code: error.code, message: error.message };
+    }
+    if (error.code === 'gateway-unconfigured' || error.code === 'mock-forbidden') {
+      return { status: 503, code: error.code, message: error.message };
+    }
+    return { status: 502, code: error.code, message: error.message };
   }
   throw error;
 }
@@ -103,118 +114,6 @@ export function parseCartLines(raw: unknown): CartLineRequest[] {
   });
 }
 
-function storeAsCommerceStore(store: StoreState): CommerceStore {
-  return store as unknown as CommerceStore;
-}
-
-function enrichOrderItems(store: StoreState, orderId: string, tenantId: string): OrderItem[] {
-  return (store.orderItems ?? [])
-    .filter((item) => item.orderId === orderId && item.tenantId === tenantId)
-    .map((item) => ({
-      id: item.id,
-      tenantId: item.tenantId,
-      orderId: item.orderId,
-      itemType: item.itemType,
-      productId: item.productId ?? null,
-      serviceId: item.serviceId ?? null,
-      quantity: item.quantity,
-      catalogUnitPrice: item.catalogUnitPrice,
-      actualUnitPrice: item.actualUnitPrice,
-      lineTotal: item.lineTotal,
-      itemName: item.itemName,
-      commissionType: item.commissionType ?? 'percentage',
-      commissionValue: item.commissionValue ?? 0,
-      commissionAmount: item.commissionAmount ?? 0,
-      overrideReason: item.overrideReason ?? null,
-    }));
-}
-
-function enrichOrder(store: StoreState, orderId: string, tenantId: string): Order {
-  const order = (store.orders ?? []).find((item) => item.id === orderId && item.tenantId === tenantId);
-  if (!order) {
-    throw new CommerceError('unknown-item', 'Order not found for this shop.');
-  }
-  return {
-    id: order.id,
-    tenantId: order.tenantId,
-    customerId: order.customerId ?? null,
-    customerName: order.customerId
-      ? store.customers.find((item) => item.id === order.customerId)?.name ?? null
-      : null,
-    sellerId: order.sellerId ?? null,
-    sellerName: order.sellerId
-      ? store.users.find((item) => item.id === order.sellerId)?.fullName ?? null
-      : null,
-    status: order.status as Order['status'],
-    subtotal: order.subtotal,
-    total: order.total,
-    currencyCode: order.currencyCode,
-    source: order.source,
-    notes: order.notes ?? null,
-    items: enrichOrderItems(store, order.id, tenantId),
-    submittedAt: order.submittedAt ?? null,
-    approvedAt: order.approvedAt ?? null,
-    completedAt: order.completedAt ?? null,
-    createdAt: order.createdAt,
-    sellerCredentialId: order.sellerCredentialId ?? null,
-    paymentMethod: order.paymentMethod ?? null,
-    customerPhone: order.customerPhone ?? null,
-  };
-}
-
-function enrichSale(store: StoreState, saleId: string, tenantId: string): Sale {
-  const sale = (store.sales ?? []).find((item) => item.id === saleId && item.tenantId === tenantId);
-  if (!sale) {
-    throw new CommerceError('unknown-item', 'Sale not found for this shop.');
-  }
-  const items: SaleItem[] = (store.saleItems ?? [])
-    .filter((item) => item.saleId === sale.id && item.tenantId === tenantId)
-    .map((item) => ({
-      id: item.id,
-      tenantId: item.tenantId,
-      saleId: item.saleId,
-      itemType: item.itemType,
-      productId: item.productId ?? null,
-      serviceId: item.serviceId ?? null,
-      quantity: item.quantity,
-      catalogUnitPrice: item.catalogUnitPrice,
-      actualUnitPrice: item.actualUnitPrice,
-      lineTotal: item.lineTotal,
-      itemName: item.itemName,
-      commissionType: item.commissionType ?? 'percentage',
-      commissionValue: item.commissionValue ?? 0,
-      commissionAmount: item.commissionAmount ?? 0,
-      overrideReason: item.overrideReason ?? null,
-      overrideHistoryUnknown: item.overrideHistoryUnknown ?? false,
-    }));
-  return {
-    id: sale.id,
-    tenantId: sale.tenantId,
-    orderId: sale.orderId,
-    customerId: sale.customerId ?? null,
-    customerName: sale.customerId
-      ? store.customers.find((item) => item.id === sale.customerId)?.name ?? null
-      : null,
-    sellerId: sale.sellerId ?? null,
-    sellerName: sale.sellerId
-      ? store.users.find((item) => item.id === sale.sellerId)?.fullName ?? null
-      : null,
-    status: sale.status as Sale['status'],
-    subtotal: sale.subtotal,
-    total: sale.total,
-    currencyCode: sale.currencyCode,
-    source: (store.orders ?? []).find((item) => item.id === sale.orderId && item.tenantId === tenantId)?.source ?? 'STAFF',
-    items,
-    completedAt: sale.completedAt ?? null,
-    voidedAt: sale.voidedAt ?? null,
-    voidReason: sale.voidReason ?? null,
-    createdAt: sale.createdAt,
-    sellerCredentialId: sale.sellerCredentialId ?? null,
-    paymentMethod: sale.paymentMethod ?? null,
-    customerPhone: sale.customerPhone ?? null,
-  };
-}
-
 export type CreateCommerceOrderInput = {
   customerId?: string | null;
   lines: CartLineRequest[];
@@ -224,108 +123,137 @@ export type CreateCommerceOrderInput = {
   idempotencyKey?: string | null;
   /** Phase 3: QR credential attribution (validated by the ops layer). */
   sellerCredentialId?: string | null;
+  /** Phase 4 payment intent. Absent means CASH (immediate completion). */
   paymentMethod?: string | null;
   customerPhone?: string | null;
 };
+
+async function requireOrderView(repo: ReturnType<typeof getCommerceRepository>, tenantId: string, orderId: string): Promise<Order> {
+  const order = await repo.getOrderView(tenantId, orderId);
+  if (!order) {
+    throw new CommerceError('unknown-item', 'Order not found for this shop.');
+  }
+  return order;
+}
+
+async function requireSaleView(repo: ReturnType<typeof getCommerceRepository>, tenantId: string, saleId: string): Promise<Sale> {
+  const sale = await repo.getSaleView(tenantId, saleId);
+  if (!sale) {
+    throw new CommerceError('unknown-item', 'Sale not found for this shop.');
+  }
+  return sale;
+}
 
 export async function createAndSubmitOrder(
   session: CommerceSession,
   input: CreateCommerceOrderInput,
 ): Promise<{ order: Order; sale: Sale | null; route: 'PENDING_REVIEW' | 'AUTO_APPROVE'; duplicate: boolean }> {
+  const repo = getCommerceRepository();
   const key = normalizeIdempotencyKey(input.idempotencyKey ?? null);
   const source: OrderSource =
     input.source ?? (session.userRole === 'shop_admin' || session.userRole === 'super_admin' ? 'ADMIN' : 'STAFF');
+  const paymentMethod = input.paymentMethod ?? 'CASH';
 
-  return updateStore((store) => {
-    const commerce = storeAsCommerceStore(store);
-    const tenant = store.tenants.find((item) => item.id === session.tenantId) ?? null;
-    const policy = tenant?.orderReviewRequired ?? true;
-
-    const created = createOrder(
-      commerce,
-      {
-        tenantId: session.tenantId,
-        customerId: input.customerId ?? null,
-        sellerId: session.userId,
-        source,
-        notes: input.notes ?? null,
-        lines: input.lines,
-        clientTotal: input.clientTotal ?? null,
-        idempotencyKey: key,
-        creatorRole: actorRoleOf(session),
-        creatorId: session.userId,
-        orderReviewRequired: policy,
-        sellerCredentialId: input.sellerCredentialId ?? null,
-        paymentMethod: input.paymentMethod ?? null,
-        customerPhone: input.customerPhone ?? null,
-      },
-    );
-
-    if (created.duplicate) {
-      return { order: enrichOrder(store, created.order.id, session.tenantId), sale: null, route: 'AUTO_APPROVE' as const, duplicate: true };
-    }
-
-    const submitted = submitOrder(
-      commerce,
-      {
-        tenantId: session.tenantId,
-        orderId: created.order.id,
-        actorId: session.userId,
-        actorRole: actorRoleOf(session),
-        orderReviewRequired: policy,
-      },
-    );
-
-    // Staff-speed path: an auto-approved order finalizes its sale in the SAME
-    // mutator (atomic inventory). Review-routed orders wait for an admin.
-    let sale: Sale | null = null;
-    if (submitted.route === 'AUTO_APPROVE') {
-      const finalized = finalizeApprovedOrder(commerce, {
-        tenantId: session.tenantId,
-        orderId: created.order.id,
-        actorId: session.userId,
-      });
-      sale = enrichSale(store, finalized.sale.id, session.tenantId);
-    }
-
-    return { order: enrichOrder(store, created.order.id, session.tenantId), sale, route: submitted.route, duplicate: false };
+  const policy = await repo.getTenantPolicy(session.tenantId);
+  const created = await repo.createOrder({
+    tenantId: session.tenantId,
+    customerId: input.customerId ?? null,
+    sellerId: session.userId,
+    source,
+    notes: input.notes ?? null,
+    lines: input.lines,
+    clientTotal: input.clientTotal ?? null,
+    idempotencyKey: key,
+    creatorRole: actorRoleOf(session),
+    creatorId: session.userId,
+    orderReviewRequired: policy.orderReviewRequired,
+    sellerCredentialId: input.sellerCredentialId ?? null,
+    paymentMethod,
+    customerPhone: input.customerPhone ?? null,
   });
+
+  if (created.duplicate) {
+    return { order: await requireOrderView(repo, session.tenantId, created.order.id), sale: null, route: 'AUTO_APPROVE', duplicate: true };
+  }
+
+    const submitted = await repo.submitOrder({
+      tenantId: session.tenantId,
+      orderId: created.order.id,
+      actorId: session.userId,
+      actorRole: actorRoleOf(session),
+      orderReviewRequired: policy.orderReviewRequired,
+      forceReview: paymentMethod === 'MPESA',
+    });
+
+  // Staff-speed path: an auto-approved CASH order finalizes its sale in the
+  // repository transaction and records its cash payment. M-Pesa orders stay
+  // held for provider confirmation (no sale, no stock movement).
+  let sale: Sale | null = null;
+  if (submitted.route === 'AUTO_APPROVE' && paymentMethod === 'CASH') {
+    const finalized = await repo.finalizeApprovedOrder({
+      tenantId: session.tenantId,
+      orderId: created.order.id,
+      actorId: session.userId,
+    });
+    await recordCashPayment(repo, {
+      tenantId: session.tenantId,
+      orderId: created.order.id,
+      saleId: finalized.sale.id,
+      amount: finalized.sale.total,
+      currencyCode: finalized.sale.currencyCode,
+      actorId: session.userId,
+    });
+    sale = await requireSaleView(repo, session.tenantId, finalized.sale.id);
+  }
+
+  return { order: await requireOrderView(repo, session.tenantId, created.order.id), sale, route: submitted.route, duplicate: false };
 }
 
 export async function submitCommerceOrder(
   session: CommerceSession,
   orderId: string,
 ): Promise<{ order: Order; route: 'PENDING_REVIEW' | 'AUTO_APPROVE' }> {
-  return updateStore((store) => {
-    const tenant = store.tenants.find((item) => item.id === session.tenantId) ?? null;
-    const submitted = submitOrder(storeAsCommerceStore(store), {
-      tenantId: session.tenantId,
-      orderId,
-      actorId: session.userId,
-      actorRole: actorRoleOf(session),
-      orderReviewRequired: tenant?.orderReviewRequired ?? true,
-    });
-    return { order: enrichOrder(store, orderId, session.tenantId), route: submitted.route };
+  const repo = getCommerceRepository();
+  const policy = await repo.getTenantPolicy(session.tenantId);
+  const submitted = await repo.submitOrder({
+    tenantId: session.tenantId,
+    orderId,
+    actorId: session.userId,
+    actorRole: actorRoleOf(session),
+    orderReviewRequired: policy.orderReviewRequired,
   });
+  return { order: await requireOrderView(repo, session.tenantId, orderId), route: submitted.route };
 }
 
 export async function approveCommerceOrder(
   session: CommerceSession,
   orderId: string,
 ): Promise<{ order: Order; sale: Sale; duplicate: boolean }> {
-  return updateStore((store) => {
-    const result = approveOrder(storeAsCommerceStore(store), {
-      tenantId: session.tenantId,
-      orderId,
-      actorId: session.userId,
-      actorRole: actorRoleOf(session),
-    });
-    return {
-      order: enrichOrder(store, result.order.id, session.tenantId),
-      sale: enrichSale(store, result.sale.id, session.tenantId),
-      duplicate: result.duplicate,
-    };
+  const repo = getCommerceRepository();
+  const result = await repo.approveOrder({
+    tenantId: session.tenantId,
+    orderId,
+    actorId: session.userId,
+    actorRole: actorRoleOf(session),
   });
+  if (!result.duplicate) {
+    const order = await requireOrderView(repo, session.tenantId, orderId);
+    if ((order.paymentMethod ?? 'CASH') === 'CASH') {
+      await recordCashPayment(repo, {
+        tenantId: session.tenantId,
+        orderId,
+        saleId: result.sale.id,
+        amount: result.sale.total,
+        currencyCode: result.sale.currencyCode,
+        actorId: session.userId,
+      });
+    }
+  }
+  return {
+    order: await requireOrderView(repo, session.tenantId, orderId),
+    sale: await requireSaleView(repo, session.tenantId, result.sale.id),
+    duplicate: result.duplicate,
+  };
 }
 
 export async function rejectCommerceOrder(
@@ -333,26 +261,21 @@ export async function rejectCommerceOrder(
   orderId: string,
   reason?: string | null,
 ): Promise<Order> {
-  return updateStore((store) => {
-    const order = rejectOrder(storeAsCommerceStore(store), {
-      tenantId: session.tenantId,
-      orderId,
-      actorId: session.userId,
-      actorRole: actorRoleOf(session),
-      reason: reason ?? null,
-    });
-    return enrichOrder(store, order.id, session.tenantId);
+  const repo = getCommerceRepository();
+  await repo.rejectOrder({
+    tenantId: session.tenantId,
+    orderId,
+    actorId: session.userId,
+    actorRole: actorRoleOf(session),
+    reason: reason ?? null,
   });
+  return requireOrderView(repo, session.tenantId, orderId);
 }
 
 export async function cancelCommerceOrder(session: CommerceSession, orderId: string): Promise<Order> {
-  return updateStore((store) => {
-    const order = cancelOrder(storeAsCommerceStore(store), {
-      tenantId: session.tenantId,
-      orderId,
-    });
-    return enrichOrder(store, order.id, session.tenantId);
-  });
+  const repo = getCommerceRepository();
+  await repo.cancelOrder({ tenantId: session.tenantId, orderId });
+  return requireOrderView(repo, session.tenantId, orderId);
 }
 
 export async function voidCommerceSale(
@@ -360,32 +283,21 @@ export async function voidCommerceSale(
   saleId: string,
   reason?: string | null,
 ): Promise<Sale> {
-  return updateStore((store) => {
-    const { sale } = voidSale(storeAsCommerceStore(store), {
-      tenantId: session.tenantId,
-      saleId,
-      actorId: session.userId,
-      actorRole: actorRoleOf(session),
-      reason: reason ?? null,
-    });
-    // Phase 2: co-written legacy rows follow the engine void (same mutator),
-    // including linked-booking restoration inside voidServiceRecord.
-    for (const record of store.serviceRecords) {
-      if (record.tenantId === session.tenantId && record.commerceSaleId === sale.id && !record.voidedAt) {
-        voidServiceRecord(store, {
-          tenantId: session.tenantId,
-          recordId: record.id,
-          userId: session.userId,
-          reason: reason?.trim() || 'Sale voided.',
-        });
-      }
-    }
-    return enrichSale(store, sale.id, session.tenantId);
+  const repo = getCommerceRepository();
+  const result = await repo.voidSale({
+    tenantId: session.tenantId,
+    saleId,
+    actorId: session.userId,
+    actorRole: actorRoleOf(session),
+    reason: reason ?? null,
   });
+  void result;
+  return requireSaleView(repo, session.tenantId, saleId);
 }
 
 export async function listCommerceOrders(session: CommerceSession, options: { ownOnly?: boolean } = {}): Promise<Order[]> {
-  const orders = await listOrdersByTenant(session.tenantId);
+  const repo = getCommerceRepository();
+  const orders = await repo.listOrderViews(session.tenantId);
   if (session.userRole === 'staff' || options.ownOnly) {
     return orders.filter((order) => order.sellerId === session.userId);
   }
@@ -393,7 +305,8 @@ export async function listCommerceOrders(session: CommerceSession, options: { ow
 }
 
 export async function getCommerceOrder(session: CommerceSession, orderId: string): Promise<Order | null> {
-  const order = await getOrderById(session.tenantId, orderId);
+  const repo = getCommerceRepository();
+  const order = await repo.getOrderView(session.tenantId, orderId);
   if (!order) {
     return null;
   }
@@ -404,7 +317,8 @@ export async function getCommerceOrder(session: CommerceSession, orderId: string
 }
 
 export async function listCommerceSales(session: CommerceSession, options: { ownOnly?: boolean } = {}): Promise<Sale[]> {
-  const sales = await listSalesByTenant(session.tenantId);
+  const repo = getCommerceRepository();
+  const sales = await repo.listSaleViews(session.tenantId);
   if (session.userRole === 'staff' || options.ownOnly) {
     return sales.filter((sale) => sale.sellerId === session.userId);
   }
@@ -412,7 +326,8 @@ export async function listCommerceSales(session: CommerceSession, options: { own
 }
 
 export async function getCommerceSale(session: CommerceSession, saleId: string): Promise<Sale | null> {
-  const sale = await getSaleById(session.tenantId, saleId);
+  const repo = getCommerceRepository();
+  const sale = await repo.getSaleView(session.tenantId, saleId);
   if (!sale) {
     return null;
   }
@@ -423,7 +338,7 @@ export async function getCommerceSale(session: CommerceSession, saleId: string):
 }
 
 export async function getTenantPolicy(tenantId: string): Promise<{ orderReviewRequired: boolean }> {
-  const store = await readStore();
-  const tenant = store.tenants.find((item) => item.id === tenantId) ?? null;
-  return { orderReviewRequired: tenant?.orderReviewRequired ?? true };
+  const repo = getCommerceRepository();
+  const policy = await repo.getTenantPolicy(tenantId);
+  return { orderReviewRequired: policy.orderReviewRequired };
 }

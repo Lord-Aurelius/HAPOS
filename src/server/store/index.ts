@@ -925,7 +925,7 @@ export async function listInventoryMovementsByTenant(tenantId: string, productId
     .map(inventoryMovementFromStore);
 }
 
-function orderItemFromStore(item: StoreOrderItem): OrderItem {
+export function orderItemFromStore(item: StoreOrderItem): OrderItem {
   return {
     id: item.id,
     tenantId: item.tenantId,
@@ -945,7 +945,7 @@ function orderItemFromStore(item: StoreOrderItem): OrderItem {
   };
 }
 
-function orderFromStore(
+export function orderFromStore(
   order: StoreOrder,
   items: StoreOrderItem[],
   users: StoreUser[],
@@ -981,7 +981,7 @@ function orderFromStore(
   };
 }
 
-function saleItemFromStore(item: StoreSaleItem): SaleItem {
+export function saleItemFromStore(item: StoreSaleItem): SaleItem {
   return {
     id: item.id,
     tenantId: item.tenantId,
@@ -1002,7 +1002,7 @@ function saleItemFromStore(item: StoreSaleItem): SaleItem {
   };
 }
 
-function saleFromStore(
+export function saleFromStore(
   sale: StoreSale,
   items: StoreSaleItem[],
   users: StoreUser[],
