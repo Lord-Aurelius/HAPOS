@@ -246,6 +246,17 @@ describe('routeNewOrder', () => {
       'AUTO_APPROVE',
     );
   });
+
+  it('forceReview holds orders regardless of source or policy (M-Pesa intent)', () => {
+    assert.equal(
+      routeNewOrder({ source: 'STAFF', creatorRole: 'staff', hasDownwardOverride: false, orderReviewRequired: false, forceReview: true }),
+      'PENDING_REVIEW',
+    );
+    assert.equal(
+      routeNewOrder({ source: 'ADMIN', creatorRole: 'shop_admin', hasDownwardOverride: false, orderReviewRequired: false, forceReview: true }),
+      'PENDING_REVIEW',
+    );
+  });
 });
 
 describe('mapServiceRecordToSaleSnapshot', () => {

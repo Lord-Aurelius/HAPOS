@@ -351,6 +351,9 @@ export type StoreOrder = {
   createdBy?: string | null;
   /** Phase 3 audit link: credential that created the order (null otherwise). */
   sellerCredentialId?: string | null;
+  /** Phase 3 payment intent (CASH | MPESA | null). */
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -398,6 +401,8 @@ export type StoreSale = {
   voidReason?: string | null;
   /** Phase 3 audit link: credential that created the sale (null otherwise). */
   sellerCredentialId?: string | null;
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
   createdAt: string;
   updatedAt: string;
 };

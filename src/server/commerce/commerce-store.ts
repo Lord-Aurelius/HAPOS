@@ -118,6 +118,13 @@ export type OpsOrder = {
   createdBy?: string | null;
   /** Phase 3 audit link: credential that created the order (null otherwise). */
   sellerCredentialId?: string | null;
+  /**
+   * Phase 3 payment intent: CASH completes immediately; MPESA holds the order
+   * for Phase 4 payment (never auto-finalized). Copied to the sale on finalize.
+   */
+  paymentMethod?: string | null;
+  /** Phase 3 M-Pesa destination in E.164 (validated at the entry surface). */
+  customerPhone?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -147,6 +154,9 @@ export type OpsSale = {
   voidReason?: string | null;
   /** Phase 3 audit link, copied from the order at finalization. */
   sellerCredentialId?: string | null;
+  /** Phase 3 payment intent, copied from the order at finalization. */
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -237,6 +247,9 @@ export type CreateOrderInput = {
   orderReviewRequired: boolean;
   /** Phase 3: QR credential attribution. Validated below when present. */
   sellerCredentialId?: string | null;
+  /** Phase 3 payment intent (CASH completes; MPESA is held for Phase 4). */
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
 };
 
 export function createOrder(
@@ -337,6 +350,8 @@ export function createOrder(
     quotedAt: now,
     createdBy: input.creatorId,
     sellerCredentialId: input.sellerCredentialId ?? null,
+    paymentMethod: input.paymentMethod ?? null,
+    customerPhone: input.customerPhone ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -386,7 +401,7 @@ function pushOrderItem(
 
 export function submitOrder(
   store: CommerceStore,
-  input: { tenantId: string; orderId: string; actorId: string; actorRole: ActorRole; orderReviewRequired: boolean },
+  input: { tenantId: string; orderId: string; actorId: string; actorRole: ActorRole; orderReviewRequired: boolean; forceReview?: boolean },
   ctx: OpContext = {},
 ): { order: OpsOrder; route: 'PENDING_REVIEW' | 'AUTO_APPROVE' } {
   const order = findOrder(store, input.tenantId, input.orderId);
@@ -406,6 +421,7 @@ export function submitOrder(
     creatorRole: input.actorRole,
     hasDownwardOverride,
     orderReviewRequired: input.orderReviewRequired,
+    forceReview: input.forceReview ?? false,
   });
 
   if (decision === 'PENDING_REVIEW') {
@@ -551,6 +567,8 @@ export function finalizeApprovedOrder(
     completedAt: now,
     recordedBy: input.actorId,
     sellerCredentialId: order.sellerCredentialId ?? null,
+    paymentMethod: order.paymentMethod ?? null,
+    customerPhone: order.customerPhone ?? null,
     createdAt: now,
     updatedAt: now,
   };

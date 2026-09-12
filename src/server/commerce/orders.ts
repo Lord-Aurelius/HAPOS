@@ -322,14 +322,19 @@ export type ReviewRoute = 'PENDING_REVIEW' | 'AUTO_APPROVE';
  * explicit — never buried in frontend behaviour:
  * - customer bookings follow the merchant `orderReviewRequired` flag,
  * - staff downward overrides always need admin review,
- * - admin overrides are audited but never block on themselves.
+ * - admin overrides are audited but never block on themselves,
+ * - `forceReview` (e.g. unpaid M-Pesa intent) holds the order regardless.
  */
 export function routeNewOrder(input: {
   source: OrderSource;
   creatorRole: 'shop_admin' | 'staff' | 'super_admin' | 'customer' | 'system';
   hasDownwardOverride: boolean;
   orderReviewRequired: boolean;
+  forceReview?: boolean;
 }): ReviewRoute {
+  if (input.forceReview) {
+    return 'PENDING_REVIEW';
+  }
   if (input.source === 'CUSTOMER_BOOKING') {
     return input.orderReviewRequired ? 'PENDING_REVIEW' : 'AUTO_APPROVE';
   }

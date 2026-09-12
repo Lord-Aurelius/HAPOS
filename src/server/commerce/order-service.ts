@@ -153,6 +153,8 @@ function enrichOrder(store: StoreState, orderId: string, tenantId: string): Orde
     completedAt: order.completedAt ?? null,
     createdAt: order.createdAt,
     sellerCredentialId: order.sellerCredentialId ?? null,
+    paymentMethod: order.paymentMethod ?? null,
+    customerPhone: order.customerPhone ?? null,
   };
 }
 
@@ -204,6 +206,8 @@ function enrichSale(store: StoreState, saleId: string, tenantId: string): Sale {
     voidReason: sale.voidReason ?? null,
     createdAt: sale.createdAt,
     sellerCredentialId: sale.sellerCredentialId ?? null,
+    paymentMethod: sale.paymentMethod ?? null,
+    customerPhone: sale.customerPhone ?? null,
   };
 }
 
@@ -216,6 +220,8 @@ export type CreateCommerceOrderInput = {
   idempotencyKey?: string | null;
   /** Phase 3: QR credential attribution (validated by the ops layer). */
   sellerCredentialId?: string | null;
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
 };
 
 export async function createAndSubmitOrder(
@@ -246,6 +252,8 @@ export async function createAndSubmitOrder(
         creatorId: session.userId,
         orderReviewRequired: policy,
         sellerCredentialId: input.sellerCredentialId ?? null,
+        paymentMethod: input.paymentMethod ?? null,
+        customerPhone: input.customerPhone ?? null,
       },
     );
 

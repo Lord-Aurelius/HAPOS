@@ -21,6 +21,7 @@ export type SaleValidationCode =
   | 'missing-id'
   | 'missing-name'
   | 'invalid-date'
+  | 'invalid-phone'
   | 'invalid-sku'
   | 'duplicate-sku'
   | 'invalid-threshold';
@@ -176,4 +177,27 @@ export function parseExpenseDateInput(raw: unknown, field = 'expenseDate'): stri
     throw new SaleValidationError('invalid-date', field, `${field} must be a valid date (YYYY-MM-DD).`);
   }
   return text;
+}
+
+/**
+ * Validate + normalize a Kenyan M-Pesa phone number to E.164 (`+254…`).
+ * Accepts `07XXXXXXXX`, `254XXXXXXXXX`, `+254XXXXXXXXX` (mobile 7XX/1XX).
+ * This is an input boundary for Phase 4 PaymentOS — no payment is created.
+ */
+export function parseKenyanPhoneInput(raw: unknown, field = 'customerPhone'): string {
+  const digits = typeof raw === 'string' ? raw.replace(/\D/g, '') : '';
+  let normalized = '';
+  if (/^0[17]\d{8}$/.test(digits)) {
+    normalized = `+254${digits.slice(1)}`;
+  } else if (/^254[17]\d{8}$/.test(digits)) {
+    normalized = `+${digits}`;
+  }
+  if (!normalized) {
+    throw new SaleValidationError(
+      'invalid-phone',
+      field,
+      `${field} must be a valid Kenyan mobile number (e.g. 0712345678).`,
+    );
+  }
+  return normalized;
 }

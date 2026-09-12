@@ -298,6 +298,8 @@ export type Order = {
   completedAt?: string | null;
   createdAt: string;
   sellerCredentialId?: string | null;
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
 };
 
 export type SaleItem = {
@@ -339,6 +341,8 @@ export type Sale = {
   voidReason?: string | null;
   createdAt: string;
   sellerCredentialId?: string | null;
+  paymentMethod?: string | null;
+  customerPhone?: string | null;
 };
 
 export type Subscription = {

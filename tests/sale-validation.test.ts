@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import {
   SaleValidationError,
   parseExpenseDateInput,
+  parseKenyanPhoneInput,
   parseMoneyInput,
   parseOptionalMoneyInput,
   parseProductQuantityInput,
   requireEntityId,
   resolveProductUsage,
-} from '../src/server/commerce/sale-validation.ts';
-import { makeProduct } from './fixtures.ts';
+} from '../src/server/commerce/sale-validation.ts';import { makeProduct } from './fixtures.ts';
 
 function assertThrowsCode(fn: () => unknown, code: string) {
   assert.throws(
@@ -124,5 +124,23 @@ describe('parseExpenseDateInput', () => {
     assertThrowsCode(() => parseExpenseDateInput('04/04/2026'), 'invalid-date');
     assertThrowsCode(() => parseExpenseDateInput('2026-13-40'), 'invalid-date');
     assertThrowsCode(() => parseExpenseDateInput('yesterday'), 'invalid-date');
+  });
+});
+
+describe('parseKenyanPhoneInput (M-Pesa boundary)', () => {
+  it('normalizes local, country-code and E.164 forms to +254', () => {
+    assert.equal(parseKenyanPhoneInput('0712345678'), '+254712345678');
+    assert.equal(parseKenyanPhoneInput('254712345678'), '+254712345678');
+    assert.equal(parseKenyanPhoneInput('+254712345678'), '+254712345678');
+    assert.equal(parseKenyanPhoneInput(' 0712 345 678 '), '+254712345678');
+    assert.equal(parseKenyanPhoneInput('0112345678'), '+254112345678');
+  });
+
+  it('rejects malformed numbers without persisting anything', () => {
+    assertThrowsCode(() => parseKenyanPhoneInput(''), 'invalid-phone');
+    assertThrowsCode(() => parseKenyanPhoneInput('12345'), 'invalid-phone');
+    assertThrowsCode(() => parseKenyanPhoneInput('07123'), 'invalid-phone');
+    assertThrowsCode(() => parseKenyanPhoneInput('+15551234567'), 'invalid-phone');
+    assertThrowsCode(() => parseKenyanPhoneInput('abcdefghij'), 'invalid-phone');
   });
 });

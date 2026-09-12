@@ -967,6 +967,8 @@ function orderFromStore(
     completedAt: order.completedAt ?? null,
     createdAt: order.createdAt,
     sellerCredentialId: order.sellerCredentialId ?? null,
+    paymentMethod: order.paymentMethod ?? null,
+    customerPhone: order.customerPhone ?? null,
   };
 }
 
@@ -1023,6 +1025,8 @@ function saleFromStore(
     voidReason: sale.voidReason ?? null,
     createdAt: sale.createdAt,
     sellerCredentialId: sale.sellerCredentialId ?? null,
+    paymentMethod: sale.paymentMethod ?? null,
+    customerPhone: sale.customerPhone ?? null,
   };
 }
 
