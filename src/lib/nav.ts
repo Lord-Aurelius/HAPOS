@@ -11,6 +11,7 @@ export const shopNav: NavItem[] = [
   { href: '/app/dashboard', label: 'Dashboard', roles: ['shop_admin', 'super_admin', 'staff'] },
   { href: '/app/ai-dashboard', label: 'AEGIS Analytics', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/service-entry', label: 'Service Entry', roles: ['shop_admin', 'super_admin', 'staff'] },
+  { href: '/app/orders', label: 'Orders', roles: ['shop_admin', 'super_admin', 'staff'] },
   { href: '/app/sales', label: 'Sales Ledger', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/customers', label: 'Customers', roles: ['shop_admin', 'super_admin', 'staff'] },
   { href: '/app/services', label: 'Price List', roles: ['shop_admin', 'super_admin', 'staff'] },
