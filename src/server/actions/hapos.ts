@@ -32,6 +32,7 @@ import {
   validateServiceInput,
 } from '@/server/commerce/catalog';
 import {
+  amendEngineSaleForCorrection,
   approveOrder,
   createOrder,
   finalizeApprovedOrder,
@@ -915,8 +916,12 @@ export async function updateServiceRecordAction(formData: FormData) {
   }
 
   // Validation failures inside the mutator are collected into `updateError`
-  // and redirected (explicit UX) instead of throwing raw 500s.
+  // and redirected (explicit UX) instead of throwing raw 500s. Engine
+  // amendment failures throw instead: they must roll back the legacy edit in
+  // the same mutator, and the outer catch below turns them into redirects.
   let updateError: string | null = null;
+  const correctionReason = formString(formData, 'correctionReason');
+  try {
   await updateStore((store) => {
     const record = store.serviceRecords.find((item) => item.id === recordId && item.tenantId === tenantId);
     if (!record) {
@@ -968,6 +973,24 @@ export async function updateServiceRecordAction(formData: FormData) {
       price,
     });
 
+    // Phase 3: propagate to the co-written engine sale FIRST — a throw here
+    // rolls back the legacy edit below (single atomic mutator). Legacy-only
+    // rows no-op inside the amendment.
+    amendEngineSaleForCorrection(storeAsCommerceStore(store), {
+      tenantId,
+      legacyRecordId: record.id,
+      corrected: {
+        price,
+        serviceId: service?.id ?? null,
+        serviceName,
+        commissionType: commission.commissionType,
+        commissionValue: commission.commissionValue,
+        commissionAmount: commission.commissionAmount,
+      },
+      actorId: session.user.id,
+      reason: correctionReason,
+    });
+
     record.customerId = customer.id;
     record.staffId = staff.id;
     record.serviceId = service?.id ?? null;
@@ -983,6 +1006,12 @@ export async function updateServiceRecordAction(formData: FormData) {
     record.correctedAt = new Date().toISOString();
     record.correctedBy = session.user.id;
   });
+  } catch (error) {
+    if (error instanceof CommerceError || error instanceof InventoryError) {
+      redirect(`/app/sales?recordId=${recordId}&error=${error.code}`);
+    }
+    throw error;
+  }
 
   if (updateError) {
     redirect(`/app/sales?recordId=${recordId}&error=${updateError}`);

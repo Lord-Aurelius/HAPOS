@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { parseDateTimeInputValue } from '@/lib/date-time';
 import { apiBadRequest, apiOk } from '@/server/http/api';
 import { requireSession } from '@/server/auth/demo-session';
+import { amendEngineSaleForCorrection } from '@/server/commerce/commerce-store';
+import type { CommerceStore } from '@/server/commerce/commerce-store';
 import {
   SaleValidationError,
   parseMoneyInput,
@@ -162,6 +164,23 @@ export async function PATCH(request: Request, { params }: RouteProps) {
         service: service ? { commissionType: service.commissionType, commissionValue: service.commissionValue } : null,
         staff: { commissionType: staff.commissionType, commissionValue: staff.commissionValue },
         price,
+      });
+
+      // Phase 3: propagate to the co-written engine sale first — a throw
+      // rolls back the legacy edit below (single atomic mutator).
+      amendEngineSaleForCorrection(store as unknown as CommerceStore, {
+        tenantId,
+        legacyRecordId: record.id,
+        corrected: {
+          price,
+          serviceId: service?.id ?? null,
+          serviceName: service ? service.name : String(body.customServiceName ?? '').trim(),
+          commissionType: commission.commissionType,
+          commissionValue: commission.commissionValue,
+          commissionAmount: commission.commissionAmount,
+        },
+        actorId: session.user.id,
+        reason: typeof body.correctionReason === 'string' ? body.correctionReason : null,
       });
 
       record.customerId = customer.id;

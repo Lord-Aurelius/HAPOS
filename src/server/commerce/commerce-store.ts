@@ -175,6 +175,8 @@ export type CommerceStore = {
   serviceProductLinks?: OpsBomLink[];
   inventoryMovements?: OpsMovement[];
   sellerCredentials?: { id: string; tenantId: string; sellerId: string; status: string }[];
+  serviceRecords?: { id: string; tenantId: string; commerceSaleId?: string | null }[];
+  saleAmendments?: OpsSaleAmendment[];
   orders: OpsOrder[];
   orderItems: OpsOrderItem[];
   sales: OpsSale[];
@@ -590,10 +592,10 @@ export function finalizeApprovedOrder(
 
     // 3. Post inventory: product lines as SALE, service lines as consumption.
     if (item.itemType === 'PRODUCT' && item.productId) {
-      postSaleMovement(store, order, sale, item.productId, -item.quantity, 'SALE', input.actorId, now, ctx);
+      postSaleMovement(store, order.tenantId, sale, item.productId, -item.quantity, 'SALE', input.actorId, now, ctx);
     }
     for (const line of consumed) {
-      postSaleMovement(store, order, sale, line.productId, -line.quantity, 'SERVICE_CONSUMPTION', input.actorId, now, ctx);
+      postSaleMovement(store, order.tenantId, sale, line.productId, -line.quantity, 'SERVICE_CONSUMPTION', input.actorId, now, ctx);
     }
   }
 
@@ -606,7 +608,7 @@ export function finalizeApprovedOrder(
 
 function postSaleMovement(
   store: CommerceStore,
-  order: OpsOrder,
+  tenantId: string,
   sale: OpsSale,
   productId: string,
   quantity: number,
@@ -614,22 +616,23 @@ function postSaleMovement(
   actorId: string,
   now: string,
   ctx: OpContext,
+  referenceType = 'sale',
 ): void {
-  const product = store.products.find((item) => item.id === productId && item.tenantId === order.tenantId) ?? null;
+  const product = store.products.find((item) => item.id === productId && item.tenantId === tenantId) ?? null;
   if (!product) {
     throw new CommerceError('unknown-item', 'A product required by this sale is missing.');
   }
   const previous = product.quantityOnHand ?? 0;
   const application = applyMovement(previous, { type, quantity }, { allowNegative: ctx.allowNegative });
   store.inventoryMovements ??= [];
-  const foundProduct = store.products.find((item) => item.id === productId && item.tenantId === order.tenantId);
+  const foundProduct = store.products.find((item) => item.id === productId && item.tenantId === tenantId);
   store.inventoryMovements.push({
     id: contextId(ctx),
-    tenantId: order.tenantId,
+    tenantId,
     productId,
     quantity,
     movementType: type,
-    referenceType: 'sale',
+    referenceType,
     referenceId: sale.id,
     unitCost: foundProduct?.unitCost ?? null,
     previousQuantity: application.previousQuantity,
@@ -749,6 +752,205 @@ function reverseMovement(
     previousQuantity: application.previousQuantity,
     resultingQuantity: application.resultingQuantity,
     reason: `Reversal for voided sale ${sale.id}`,
+    createdBy: actorId,
+    createdAt: now,
+  };
+  store.inventoryMovements ??= [];
+  store.inventoryMovements.push(movement);
+  product.quantityOnHand = application.resultingQuantity;
+  return movement;
+}
+
+// ── Engine amendment (Phase 3 correction propagation) ────────────────────────
+// A legacy correction restates commercial truth; the co-written engine sale
+// must follow or Phase 4 payments would collect stale totals. Rules:
+// - catalog_unit_price stays frozen (true at sale time); actual/line/total
+//   and commission follow the corrected values.
+// - service change additionally syncs stock: reverse old BOM consumption and
+//   post the new BOM (sufficiency-checked first; failure blocks everything).
+// - legacy product usages are cost-tracking only and never touch engine stock.
+// - every amendment appends an audit row; originals are preserved in it.
+
+export type OpsSaleAmendment = {
+  id: string;
+  tenantId: string;
+  saleId: string;
+  previousTotal: number;
+  newTotal: number;
+  fieldChanges: { field: string; previous: unknown; current: unknown }[];
+  reason: string;
+  actorId?: string | null;
+  createdAt: string;
+};
+
+export type CorrectedSaleValues = {
+  price: number;
+  serviceId: string | null;
+  serviceName: string;
+  commissionType: 'fixed' | 'percentage';
+  commissionValue: number;
+  commissionAmount: number;
+};
+
+function trackChange(
+  changes: { field: string; previous: unknown; current: unknown }[],
+  field: string,
+  previous: unknown,
+  current: unknown,
+): void {
+  if (JSON.stringify(previous) !== JSON.stringify(current)) {
+    changes.push({ field, previous, current });
+  }
+}
+
+export function amendEngineSaleForCorrection(
+  store: CommerceStore,
+  input: {
+    tenantId: string;
+    legacyRecordId: string;
+    corrected: CorrectedSaleValues;
+    actorId: string;
+    reason?: string | null;
+  },
+  ctx: OpContext = {},
+): { amended: boolean; sale: OpsSale | null; stockSynced?: boolean } {
+  const record = (store.serviceRecords ?? []).find(
+    (item) => item.id === input.legacyRecordId && item.tenantId === input.tenantId,
+  ) ?? null;
+  if (!record) {
+    throw new CommerceError('unknown-item', 'Service record not found for this shop.');
+  }
+  if (!record.commerceSaleId) {
+    // Legacy-only row (custom sale or pre-Phase-3 history): nothing to sync.
+    return { amended: false, sale: null };
+  }
+
+  const reason = (input.reason ?? '').trim();
+  if (!reason) {
+    throw new CommerceError('amendment-reason-required', 'Corrections to linked sales need a reason.');
+  }
+
+  const sale = findSale(store, input.tenantId, record.commerceSaleId);
+  if (sale.status !== 'COMPLETED') {
+    throw new CommerceError('invalid-transition', 'Only completed sales can be amended.');
+  }
+
+  const items = store.saleItems.filter((item) => item.saleId === sale.id && item.tenantId === sale.tenantId);
+  if (items.length !== 1 || items[0].itemType !== 'SERVICE') {
+    throw new CommerceError('invalid-transition', 'That engine sale has unexpected lines for amendment.');
+  }
+  const item = items[0];
+  const now = contextNow(ctx);
+  const fieldChanges: { field: string; previous: unknown; current: unknown }[] = [];
+  const previousTotal = sale.total;
+
+  trackChange(fieldChanges, 'actualUnitPrice', item.actualUnitPrice, input.corrected.price);
+  trackChange(fieldChanges, 'commissionType', item.commissionType, input.corrected.commissionType);
+  trackChange(fieldChanges, 'commissionValue', item.commissionValue, input.corrected.commissionValue);
+  trackChange(fieldChanges, 'commissionAmount', item.commissionAmount, input.corrected.commissionAmount);
+
+  item.actualUnitPrice = input.corrected.price;
+  item.lineTotal = input.corrected.price * item.quantity;
+  item.commissionType = input.corrected.commissionType;
+  item.commissionValue = input.corrected.commissionValue;
+  item.commissionAmount = input.corrected.commissionAmount;
+
+  let stockSynced = false;
+  if ((item.serviceId ?? null) !== (input.corrected.serviceId ?? null)) {
+    // Reverse the old BOM consumption from the frozen snapshot, then post
+    // the new service's consumption (pre-checked for sufficiency).
+    const consumed = (item.itemSnapshot?.consumedProducts ?? []) as { productId: string; quantity: number }[];
+    const fresh = resolveServiceConsumption(
+      (store.serviceProductLinks ?? []).map((link) => ({
+        serviceId: link.serviceId,
+        tenantId: link.tenantId,
+        productId: link.productId,
+        quantity: link.quantity,
+      })),
+      input.tenantId,
+      input.corrected.serviceId ?? '',
+      item.quantity,
+    );
+    for (const line of fresh) {
+      const product = store.products.find((candidate) => candidate.id === line.productId && candidate.tenantId === input.tenantId) ?? null;
+      if (!product || (product.quantityOnHand ?? 0) - line.quantity < 0) {
+        throw new CommerceError(
+          'insufficient-stock',
+          'Insufficient stock to restate this sale to the new service. Nothing was changed.',
+        );
+      }
+    }
+    trackChange(fieldChanges, 'serviceId', item.serviceId, input.corrected.serviceId);
+    trackChange(fieldChanges, 'serviceName', item.itemName, input.corrected.serviceName);
+
+    for (const line of consumed) {
+      reverseCorrectionMovement(store, sale, line.productId, line.quantity, input.actorId, now, ctx);
+    }
+    for (const line of fresh) {
+      postSaleMovement(store, input.tenantId, sale, line.productId, -line.quantity, 'SERVICE_CONSUMPTION', input.actorId, now, ctx, 'sale_correction');
+    }
+    item.serviceId = input.corrected.serviceId;
+    item.itemName = input.corrected.serviceName;
+    const correctedService = input.corrected.serviceId
+      ? store.services.find((candidate) => candidate.id === input.corrected.serviceId && candidate.tenantId === input.tenantId) ?? null
+      : null;
+    item.itemSnapshot = {
+      ...(item.itemSnapshot ?? {}),
+      durationMinutes: correctedService?.durationMinutes ?? (item.itemSnapshot as Record<string, unknown> | undefined)?.durationMinutes ?? null,
+      consumedProducts: fresh,
+    };
+    stockSynced = true;
+  }
+
+  sale.subtotal = store.saleItems
+    .filter((entry) => entry.saleId === sale.id && entry.tenantId === sale.tenantId)
+    .reduce((sum, entry) => sum + entry.lineTotal, 0);
+  sale.total = sale.subtotal;
+  sale.updatedAt = now;
+  trackChange(fieldChanges, 'total', previousTotal, sale.total);
+
+  store.saleAmendments ??= [];
+  store.saleAmendments.push({
+    id: contextId(ctx),
+    tenantId: input.tenantId,
+    saleId: sale.id,
+    previousTotal,
+    newTotal: sale.total,
+    fieldChanges,
+    reason,
+    actorId: input.actorId,
+    createdAt: now,
+  });
+
+  return { amended: true, sale, stockSynced };
+}
+
+function reverseCorrectionMovement(
+  store: CommerceStore,
+  sale: OpsSale,
+  productId: string,
+  quantity: number,
+  actorId: string,
+  now: string,
+  ctx: OpContext,
+): OpsMovement {
+  const product = store.products.find((item) => item.id === productId && item.tenantId === sale.tenantId) ?? null;
+  if (!product) {
+    throw new CommerceError('unknown-item', 'A product required by this correction is missing.');
+  }
+  const application = applyMovement(product.quantityOnHand ?? 0, { type: 'ADJUSTMENT', quantity }, { allowNegative: true });
+  const movement: OpsMovement = {
+    id: contextId(ctx),
+    tenantId: sale.tenantId,
+    productId,
+    quantity,
+    movementType: 'ADJUSTMENT',
+    referenceType: 'sale_correction',
+    referenceId: sale.id,
+    unitCost: product.unitCost ?? null,
+    previousQuantity: application.previousQuantity,
+    resultingQuantity: application.resultingQuantity,
+    reason: `Correction restatement for sale ${sale.id}`,
     createdBy: actorId,
     createdAt: now,
   };

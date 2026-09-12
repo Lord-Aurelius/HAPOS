@@ -53,6 +53,10 @@ function getMessage(params: { success?: string; error?: string }) {
     return 'That correction could not be saved. Check the entered values and try again.';
   }
 
+  if (params.error === 'amendment-reason-required') {
+    return 'Corrections to linked sales need a reason for the audit trail.';
+  }
+
   if (params.error === 'insufficient-stock') {
     return 'Insufficient stock to complete that sale. Nothing was deducted.';
   }
@@ -433,6 +437,10 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                 <div className="field">
                   <label htmlFor="description">Service notes</label>
                   <textarea id="description" name="description" defaultValue={selectedRecord.description ?? ''} />
+                </div>
+                <div className="field">
+                  <label htmlFor="correctionReason">Correction reason (required, recorded on the linked sale)</label>
+                  <input id="correctionReason" name="correctionReason" placeholder="Wrong service selected" required />
                 </div>
                 <div className="hero-actions">
                   <FormSubmitButton type="submit" className="button" pendingLabel="Saving correction...">
