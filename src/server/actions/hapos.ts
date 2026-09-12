@@ -32,17 +32,31 @@ import {
   validateServiceInput,
 } from '@/server/commerce/catalog';
 import {
+  approveOrder,
+  createOrder,
+  finalizeApprovedOrder,
+  submitOrder,
+  voidSale,
+} from '@/server/commerce/commerce-store';
+import {
   adjustProductStock,
   ensureCatalogProjection,
   postOpeningBalance,
   replaceServiceBom,
 } from '@/server/commerce/inventory-store';
 import { InventoryError } from '@/server/commerce/inventory';
+import { CommerceError } from '@/server/commerce/orders';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
 import { voidServiceRecord } from '@/server/store/service-records';
 import { authenticateCustomer, authenticateUser, readStore, updateStore } from '@/server/store';
+import type { CommerceStore } from '@/server/commerce/commerce-store';
 import type { StoreState } from '@/server/store/types';
+
+function storeAsCommerceStore(store: StoreState): CommerceStore {
+  // Structural projection cast: StoreState carries every commerce collection.
+  return store as unknown as CommerceStore;
+}
 
 function formString(formData: FormData, key: string) {
   return String(formData.get(key) ?? '').trim();
@@ -532,6 +546,56 @@ export async function approveCustomerOrderToSalesAction(formData: FormData) {
     const now = new Date().toISOString();
     const recordId = randomUUID();
 
+    // Phase 2: the booking becomes a canonical commerce order (source
+    // CUSTOMER_BOOKING) and the admin approval finalizes its sale with atomic
+    // BOM consumption — same mutator as the legacy co-write below. A stale
+    // quote that differs from catalog is an explicit, reasoned override.
+    let commerceSaleId: string | null = null;
+    try {
+      const tenant = store.tenants.find((item) => item.id === session.tenant!.id) ?? null;
+      const created = createOrder(storeAsCommerceStore(store), {
+        tenantId: session.tenant!.id,
+        customerId: customer.id,
+        sellerId: staff.id,
+        source: 'CUSTOMER_BOOKING',
+        notes: description || order.notes || null,
+        lines: [
+          {
+            kind: 'service',
+            refId: service.id,
+            quantity: 1,
+            actualUnitPrice: price,
+            overrideReason: price !== service.price ? 'Booking quoted price' : null,
+          },
+        ],
+        idempotencyKey: `booking-${order.id}`,
+        creatorRole: session.user.role,
+        creatorId: session.user.id,
+        orderReviewRequired: tenant?.orderReviewRequired ?? true,
+      });
+      if (!created.duplicate) {
+        submitOrder(storeAsCommerceStore(store), {
+          tenantId: session.tenant!.id,
+          orderId: created.order.id,
+          actorId: session.user.id,
+          actorRole: session.user.role,
+          orderReviewRequired: tenant?.orderReviewRequired ?? true,
+        });
+      }
+      const approved = approveOrder(storeAsCommerceStore(store), {
+        tenantId: session.tenant!.id,
+        orderId: created.order.id,
+        actorId: session.user.id,
+        actorRole: session.user.role,
+      });
+      commerceSaleId = approved.sale.id;
+    } catch (error) {
+      if (error instanceof CommerceError || error instanceof InventoryError) {
+        return { status: 'commerce-failed' as const, code: error.code };
+      }
+      throw error;
+    }
+
     store.serviceRecords.push({
       id: recordId,
       tenantId: session.tenant!.id,
@@ -556,6 +620,7 @@ export async function approveCustomerOrderToSalesAction(formData: FormData) {
       // Approval is already exactly-once via the order's approvedRecordId
       // link; no client key participates here.
       idempotencyKey: null,
+      commerceSaleId,
       createdAt: now,
     });
 
@@ -582,6 +647,10 @@ export async function approveCustomerOrderToSalesAction(formData: FormData) {
 
   if (result.status === 'staff-not-found') {
     redirect('/app/sales?error=approval-staff');
+  }
+
+  if (result.status === 'commerce-failed') {
+    redirect(`/app/sales?error=${result.code}`);
   }
 
   if (result.status === 'service-not-found') {
@@ -698,6 +767,57 @@ export async function recordServiceAction(formData: FormData) {
     }
     const now = new Date().toISOString();
 
+    // Phase 2: price-list sales go through the canonical commerce engine
+    // (order → auto-submit → finalized sale with atomic BOM consumption) and
+    // the legacy row below is a compatibility co-write in the SAME mutator.
+    // Custom off-menu sales have no catalog reference and stay legacy-only.
+    // Product usage lines remain legacy cost-tracking (never retail SALE
+    // movements) so uncounted stock can never block a salon sale.
+    let commerceSaleId: string | null = null;
+    if (service) {
+      try {
+        const tenant = store.tenants.find((item) => item.id === tenantId) ?? null;
+        const created = createOrder(storeAsCommerceStore(store), {
+          tenantId,
+          customerId: customer.id,
+          sellerId: staff.id,
+          source: session.user.role === 'staff' ? 'STAFF' : 'ADMIN',
+          notes: description || null,
+          lines: [{ kind: 'service', refId: service.id, quantity: 1 }],
+          idempotencyKey: requestedIdempotencyKey,
+          creatorRole: session.user.role,
+          creatorId: session.user.id,
+          orderReviewRequired: tenant?.orderReviewRequired ?? true,
+        });
+        if (!created.duplicate) {
+          const submitted = submitOrder(storeAsCommerceStore(store), {
+            tenantId,
+            orderId: created.order.id,
+            actorId: session.user.id,
+            actorRole: session.user.role,
+            orderReviewRequired: tenant?.orderReviewRequired ?? true,
+          });
+          if (submitted.route === 'AUTO_APPROVE') {
+            const finalized = finalizeApprovedOrder(storeAsCommerceStore(store), {
+              tenantId,
+              orderId: created.order.id,
+              actorId: session.user.id,
+            });
+            commerceSaleId = finalized.sale.id;
+          }
+        } else {
+          const linked = store.sales.find(
+            (sale) => sale.orderId === created.order.id && sale.tenantId === tenantId,
+          ) ?? null;
+          commerceSaleId = linked?.id ?? null;
+        }
+      } catch (error) {
+        if (error instanceof CommerceError || error instanceof InventoryError) {
+          return { ok: false as const, error: error.code };
+        }
+        throw error;
+      }
+    }
     store.serviceRecords.push({
       id: randomUUID(),
       tenantId,
@@ -722,6 +842,7 @@ export async function recordServiceAction(formData: FormData) {
       // Keyless writes (legacy clients) mint a fresh key so every post-Phase-0
       // record carries one; future QR/PaymentOS retries reuse the client key.
       idempotencyKey: requestedIdempotencyKey ?? randomUUID(),
+      commerceSaleId,
       createdAt: now,
     });
 
@@ -880,14 +1001,37 @@ export async function deleteServiceRecordAction(formData: FormData) {
   const recordId = formString(formData, 'recordId');
   const reason = formString(formData, 'reason') || 'Duplicate or mistaken sale entry removed from the ledger.';
 
-  const result = await updateStore((store) =>
-    voidServiceRecord(store, {
+  // Phase 2: void the legacy row and its co-written engine sale (with stock
+  // reversal) in the same mutator. Either side missing is benign; anything
+  // else fails loudly rather than diverging.
+  const result = await updateStore((store) => {
+    const record = store.serviceRecords.find(
+      (item) => item.id === recordId && item.tenantId === session.tenant!.id,
+    );
+    const voided = voidServiceRecord(store, {
       tenantId: session.tenant!.id,
       recordId,
       userId: session.user.id,
       reason,
-    }),
-  );
+    });
+
+    if (voided.status !== 'missing' && record?.commerceSaleId) {
+      try {
+        voidSale(storeAsCommerceStore(store), {
+          tenantId: session.tenant!.id,
+          saleId: record.commerceSaleId,
+          actorId: session.user.id,
+          actorRole: session.user.role,
+        });
+      } catch (error) {
+        if (!(error instanceof CommerceError && error.code === 'already-voided')) {
+          throw error;
+        }
+      }
+    }
+
+    return voided;
+  });
 
   if (result.status === 'missing') {
     redirect('/app/sales?error=record-missing');

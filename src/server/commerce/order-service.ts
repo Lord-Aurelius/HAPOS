@@ -12,6 +12,7 @@ import {
   approveOrder,
   cancelOrder,
   createOrder,
+  finalizeApprovedOrder,
   rejectOrder,
   submitOrder,
   voidSale,
@@ -22,6 +23,7 @@ import { CommerceError, type CartLineRequest, type OrderSource } from '@/server/
 import { InventoryError } from '@/server/commerce/inventory';
 import { SaleValidationError } from '@/server/commerce/sale-validation';
 import { getOrderById, getSaleById, listOrdersByTenant, listSalesByTenant, readStore, updateStore } from '@/server/store';
+import { voidServiceRecord } from '@/server/store/service-records';
 import type { StoreState } from '@/server/store/types';
 
 export type CommerceSession = {
@@ -214,7 +216,7 @@ export type CreateCommerceOrderInput = {
 export async function createAndSubmitOrder(
   session: CommerceSession,
   input: CreateCommerceOrderInput,
-): Promise<{ order: Order; route: 'PENDING_REVIEW' | 'AUTO_APPROVE'; duplicate: boolean }> {
+): Promise<{ order: Order; sale: Sale | null; route: 'PENDING_REVIEW' | 'AUTO_APPROVE'; duplicate: boolean }> {
   const key = normalizeIdempotencyKey(input.idempotencyKey ?? null);
   const source: OrderSource =
     input.source ?? (session.userRole === 'shop_admin' || session.userRole === 'super_admin' ? 'ADMIN' : 'STAFF');
@@ -242,7 +244,7 @@ export async function createAndSubmitOrder(
     );
 
     if (created.duplicate) {
-      return { order: enrichOrder(store, created.order.id, session.tenantId), route: 'AUTO_APPROVE' as const, duplicate: true };
+      return { order: enrichOrder(store, created.order.id, session.tenantId), sale: null, route: 'AUTO_APPROVE' as const, duplicate: true };
     }
 
     const submitted = submitOrder(
@@ -256,7 +258,19 @@ export async function createAndSubmitOrder(
       },
     );
 
-    return { order: enrichOrder(store, created.order.id, session.tenantId), route: submitted.route, duplicate: false };
+    // Staff-speed path: an auto-approved order finalizes its sale in the SAME
+    // mutator (atomic inventory). Review-routed orders wait for an admin.
+    let sale: Sale | null = null;
+    if (submitted.route === 'AUTO_APPROVE') {
+      const finalized = finalizeApprovedOrder(commerce, {
+        tenantId: session.tenantId,
+        orderId: created.order.id,
+        actorId: session.userId,
+      });
+      sale = enrichSale(store, finalized.sale.id, session.tenantId);
+    }
+
+    return { order: enrichOrder(store, created.order.id, session.tenantId), sale, route: submitted.route, duplicate: false };
   });
 }
 
@@ -336,6 +350,18 @@ export async function voidCommerceSale(
       actorRole: actorRoleOf(session),
       reason: reason ?? null,
     });
+    // Phase 2: co-written legacy rows follow the engine void (same mutator),
+    // including linked-booking restoration inside voidServiceRecord.
+    for (const record of store.serviceRecords) {
+      if (record.tenantId === session.tenantId && record.commerceSaleId === sale.id && !record.voidedAt) {
+        voidServiceRecord(store, {
+          tenantId: session.tenantId,
+          recordId: record.id,
+          userId: session.userId,
+          reason: reason?.trim() || 'Sale voided.',
+        });
+      }
+    }
     return enrichSale(store, sale.id, session.tenantId);
   });
 }

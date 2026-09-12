@@ -53,6 +53,14 @@ function getMessage(params: { success?: string; error?: string }) {
     return 'That correction could not be saved. Check the entered values and try again.';
   }
 
+  if (params.error === 'insufficient-stock') {
+    return 'Insufficient stock to complete that sale. Nothing was deducted.';
+  }
+
+  if (params.error === 'not-permitted') {
+    return 'Your role cannot perform that step. An admin is required.';
+  }
+
   if (params.error === 'record-missing') {
     return 'That sale could not be found. It may already have been removed from the ledger.';
   }

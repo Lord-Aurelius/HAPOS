@@ -60,6 +60,8 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
                 ? 'The selected product is not available for this shop. Choose another product or save without one.'
               : params.error === 'invalid-idempotency-key'
                 ? 'That submission carried an invalid retry key. Refresh the page and submit once.'
+              : params.error === 'insufficient-stock'
+                ? 'Insufficient stock to complete that sale. Nothing was deducted.'
               : params.error === 'no-services'
                 ? 'This shop has no price-list services yet. Use Custom service for now or add services first.'
                 : params.error === 'staff-not-found'

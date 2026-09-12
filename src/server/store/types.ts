@@ -173,6 +173,11 @@ export type StoreServiceRecord = {
    * created after Phase 0; legacy records backfill to `null` (no key).
    */
   idempotencyKey?: string | null;
+  /**
+   * Phase 2 link to the canonical engine sale co-written by salon flows.
+   * Null for legacy-only rows and pre-Phase-2 history.
+   */
+  commerceSaleId?: string | null;
   createdAt: string;
 };
 

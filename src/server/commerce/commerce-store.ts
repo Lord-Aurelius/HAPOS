@@ -449,6 +449,33 @@ export function approveOrder(
   order.approvedBy = input.actorId;
   order.updatedAt = now;
 
+  return finalizeApprovedOrder(store, { tenantId: input.tenantId, orderId: input.orderId, actorId: input.actorId }, ctx);
+}
+
+/**
+ * Finalize an APPROVED order into a COMPLETED sale with atomic inventory.
+ * Permission-free by design: callers must have earned APPROVED status through
+ * submit routing (staff auto-approve path) or an admin approveOrder first.
+ */
+export function finalizeApprovedOrder(
+  store: CommerceStore,
+  input: { tenantId: string; orderId: string; actorId: string },
+  ctx: OpContext = {},
+): { order: OpsOrder; sale: OpsSale; duplicate: boolean } {
+  const order = findOrder(store, input.tenantId, input.orderId);
+
+  const existingSale = store.sales.find((sale) => sale.orderId === order.id && sale.tenantId === order.tenantId) ?? null;
+  if (existingSale) {
+    return { order, sale: existingSale, duplicate: true };
+  }
+  if (order.status === 'COMPLETED') {
+    throw new CommerceError('already-approved', 'That order was already approved.');
+  }
+  if (order.status !== 'APPROVED') {
+    throw new CommerceError('invalid-transition', 'Order must be approved before the sale is finalized.');
+  }
+
+  const now = contextNow(ctx);
   const items = orderLinesOf(store, order);
 
   // 1. Pre-validate ALL stock before posting ANY movement (no partial sales).
