@@ -190,3 +190,23 @@ describe('touchSellerCredentialUsed', () => {
     assert.equal(credential.status, 'ACTIVE');
   });
 });
+
+describe('QR replay and device copying', () => {
+  it('a persistent QR verifies repeatedly and serves many transactions', () => {
+    const store = testStore();
+    const { credential, bearer } = issueSellerCredential(
+      store, { tenantId: 'tenant-a', sellerId: 'seller-1' }, { generateId, bearerHex: BEARER_HEX },
+    );
+    // Same bearer on another device resolves the identical context.
+    for (const attempt of [0, 1, 2]) {
+      const context = verifySellerCredential(
+        store, { tenantId: 'tenant-a', reference: credential.publicReference, bearer }, {},
+      );
+      assert.equal(context.sellerId, 'seller-1');
+      assert.equal(context.credentialId, credential.id);
+      void attempt;
+    }
+    touchSellerCredentialUsed(store, { tenantId: 'tenant-a', credentialId: credential.id }, {});
+    assert.ok(credential.lastUsedAt);
+  });
+});

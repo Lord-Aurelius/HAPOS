@@ -474,3 +474,76 @@ describe('sale tenant isolation', () => {
     );
   });
 });
+
+describe('QR credential attribution', () => {
+  function qrStore() {
+    const store = testStore();
+    store.users.push({ id: 'staff-2', tenantId: 'tenant-a' });
+    (store as unknown as { sellerCredentials: unknown[] }).sellerCredentials = [
+      { id: 'cred-1', tenantId: 'tenant-a', sellerId: 'staff-1', status: 'ACTIVE' },
+      { id: 'cred-revoked', tenantId: 'tenant-a', sellerId: 'staff-1', status: 'REVOKED' },
+    ];
+    return store;
+  }
+
+  it('attributes orders and sales to the verified credential', () => {
+    const store = qrStore();
+    const first = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+      sellerCredentialId: 'cred-1',
+    }, { generateId });
+    assert.equal(first.order.sellerCredentialId, 'cred-1');
+    submitOrder(store, { tenantId: 'tenant-a', orderId: first.order.id, ...STAFF, orderReviewRequired: true }, { generateId });
+    const approved = approveOrder(store, { tenantId: 'tenant-a', orderId: first.order.id, ...ADMIN }, { generateId });
+    assert.equal(approved.sale.sellerCredentialId, 'cred-1');
+
+    // Same QR, second transaction: distinct order, same attribution.
+    const second = createOrder(store, {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: true,
+      sellerCredentialId: 'cred-1',
+    }, { generateId });
+    assert.notEqual(second.order.id, first.order.id);
+    assert.equal(second.order.sellerCredentialId, 'cred-1');
+  });
+
+  it('rejects forged, revoked and mismatched credential links', () => {
+    const store = qrStore();
+    const base = {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR' as const,
+      lines: [{ kind: 'service' as const, refId: 'svc-cut', quantity: 1 }],
+      creatorRole: 'staff' as const, creatorId: 'staff-1', orderReviewRequired: true,
+    };
+    assert.throws(
+      () => createOrder(store, { ...base, sellerCredentialId: 'cred-missing' }, { generateId }),
+      (error: unknown) => error instanceof CommerceError && error.code === 'unknown-item',
+    );
+    assert.throws(
+      () => createOrder(store, { ...base, sellerCredentialId: 'cred-revoked' }, { generateId }),
+      (error: unknown) => error instanceof CommerceError && error.code === 'unknown-item',
+    );
+    // Credential belongs to staff-1 but the order names staff-2.
+    assert.throws(
+      () => createOrder(store, { ...base, sellerId: 'staff-2', sellerCredentialId: 'cred-1' }, { generateId }),
+      (error: unknown) => error instanceof CommerceError && error.code === 'unknown-item',
+    );
+  });
+
+  it('concurrent QR submissions with one key yield one order', () => {
+    const store = qrStore();
+    const input = {
+      tenantId: 'tenant-a', sellerId: 'staff-1', source: 'SELLER_QR' as const,
+      lines: [{ kind: 'service' as const, refId: 'svc-cut', quantity: 1 }],
+      idempotencyKey: 'qr-key-race-1',
+      creatorRole: 'staff' as const, creatorId: 'staff-1', orderReviewRequired: true,
+      sellerCredentialId: 'cred-1',
+    };
+    const outcomes = [0, 1].map(() => createOrder(store, input, { generateId }));
+    assert.equal(store.orders.length, 1);
+    assert.deepEqual(outcomes.map((o) => o.order.id), [store.orders[0].id, store.orders[0].id]);
+    assert.ok(outcomes.some((o) => o.duplicate));
+  });
+});
