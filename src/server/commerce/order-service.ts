@@ -152,6 +152,7 @@ function enrichOrder(store: StoreState, orderId: string, tenantId: string): Orde
     approvedAt: order.approvedAt ?? null,
     completedAt: order.completedAt ?? null,
     createdAt: order.createdAt,
+    sellerCredentialId: order.sellerCredentialId ?? null,
   };
 }
 
@@ -201,6 +202,7 @@ function enrichSale(store: StoreState, saleId: string, tenantId: string): Sale {
     voidedAt: sale.voidedAt ?? null,
     voidReason: sale.voidReason ?? null,
     createdAt: sale.createdAt,
+    sellerCredentialId: sale.sellerCredentialId ?? null,
   };
 }
 

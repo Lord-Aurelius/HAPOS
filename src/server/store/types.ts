@@ -349,6 +349,8 @@ export type StoreOrder = {
   rejectedAt?: string | null;
   rejectionReason?: string | null;
   createdBy?: string | null;
+  /** Phase 3 audit link: credential that created the order (null otherwise). */
+  sellerCredentialId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -394,6 +396,8 @@ export type StoreSale = {
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
+  /** Phase 3 audit link: credential that created the sale (null otherwise). */
+  sellerCredentialId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -422,6 +426,36 @@ export type StoreAttendanceRecord = {
   terminalReference?: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type StoreSellerCredential = {
+  id: string;
+  tenantId: string;
+  sellerId: string;
+  publicReference: string;
+  tokenHash: string;
+  status: string;
+  issuedAt: string;
+  lastUsedAt?: string | null;
+  revokedAt?: string | null;
+  expiresAt?: string | null;
+  rotatedAt?: string | null;
+  rotatedFromId?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StoreSaleAmendment = {
+  id: string;
+  tenantId: string;
+  saleId: string;
+  previousTotal: number;
+  newTotal: number;
+  fieldChanges?: { field: string; previous: unknown; current: unknown }[];
+  reason: string;
+  actorId?: string | null;
+  createdAt: string;
 };
 
 export type StoreState = {
@@ -453,4 +487,8 @@ export type StoreState = {
   // (re)generation and never persisted (both backends).
   attendanceTerminals: StoreAttendanceTerminal[];
   attendanceRecords: StoreAttendanceRecord[];
+  // Phase 3 transitional projections (SQL-authoritative; see types above).
+  // Credential rows carry tokenHash only — same one-time-bearer ceremony.
+  sellerCredentials: StoreSellerCredential[];
+  saleAmendments: StoreSaleAmendment[];
 };

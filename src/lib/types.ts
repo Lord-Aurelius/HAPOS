@@ -220,6 +220,34 @@ export type AttendanceRecord = {
   createdAt: string;
 };
 
+export type SellerCredentialStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+
+export type SellerCredential = {
+  id: string;
+  tenantId: string;
+  sellerId: string;
+  sellerName?: string | null;
+  publicReference: string;
+  status: SellerCredentialStatus;
+  issuedAt: string;
+  lastUsedAt?: string | null;
+  revokedAt?: string | null;
+  expiresAt?: string | null;
+  rotatedAt?: string | null;
+  createdAt: string;
+};
+
+export type SaleAmendment = {
+  id: string;
+  tenantId: string;
+  saleId: string;
+  previousTotal: number;
+  newTotal: number;
+  reason: string;
+  actorName?: string | null;
+  createdAt: string;
+};
+
 export type OrderStatus =
   | 'DRAFT'
   | 'SUBMITTED'
@@ -269,6 +297,7 @@ export type Order = {
   approvedAt?: string | null;
   completedAt?: string | null;
   createdAt: string;
+  sellerCredentialId?: string | null;
 };
 
 export type SaleItem = {
@@ -307,6 +336,7 @@ export type Sale = {
   voidedAt?: string | null;
   voidReason?: string | null;
   createdAt: string;
+  sellerCredentialId?: string | null;
 };
 
 export type Subscription = {

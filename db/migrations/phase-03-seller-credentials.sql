@@ -78,6 +78,34 @@ create table if not exists public.sale_amendments (
 create index if not exists sale_amendments_sale_idx
   on public.sale_amendments (tenant_id, sale_id, created_at desc);
 
+-- ── orders/sales: seller credential attribution ────────────────────────────
+-- Nullable audit link: which credential created the order/sale (NULL for
+-- portal, legacy and pre-Phase-3 rows). Revocation never rewrites history.
+
+alter table public.orders
+  add column if not exists seller_credential_id uuid;
+
+alter table public.sales
+  add column if not exists seller_credential_id uuid;
+
+do $$
+begin
+  alter table public.orders
+    add constraint orders_seller_credential_fk foreign key (tenant_id, seller_credential_id)
+    references public.seller_credentials (tenant_id, id) on delete restrict;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.sales
+    add constraint sales_seller_credential_fk foreign key (tenant_id, seller_credential_id)
+    references public.seller_credentials (tenant_id, id) on delete restrict;
+exception
+  when duplicate_object then null;
+end $$;
+
 -- ── row-level security (mirrors established conventions) ───────────────────
 
 alter table public.seller_credentials enable row level security;

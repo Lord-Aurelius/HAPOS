@@ -16,7 +16,9 @@ import type {
   Product,
   ProductUsage,
   Sale,
+  SaleAmendment,
   SaleItem,
+  SellerCredential,
   Service,
   ServiceProductLink,
   ServiceRecord,
@@ -47,7 +49,9 @@ import type {
   StoreOrderItem,
   StoreProduct,
   StoreSale,
+  StoreSaleAmendment,
   StoreSaleItem,
+  StoreSellerCredential,
   StoreService,
   StoreServiceProductLink,
   StoreServiceRecord,
@@ -477,6 +481,18 @@ function migrateStoreState(parsed: StoreState) {
       });
       changed = true;
     }
+  }
+
+  // Phase 3 projections: credentials are admin-issued only (never
+  // auto-provisioned); amendments accumulate on engine corrections.
+  if (!Array.isArray(parsed.sellerCredentials)) {
+    parsed.sellerCredentials = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.saleAmendments)) {
+    parsed.saleAmendments = [];
+    changed = true;
   }
 
   return { store: parsed, changed };
@@ -950,6 +966,7 @@ function orderFromStore(
     approvedAt: order.approvedAt ?? null,
     completedAt: order.completedAt ?? null,
     createdAt: order.createdAt,
+    sellerCredentialId: order.sellerCredentialId ?? null,
   };
 }
 
@@ -1003,6 +1020,7 @@ function saleFromStore(
     voidedAt: sale.voidedAt ?? null,
     voidReason: sale.voidReason ?? null,
     createdAt: sale.createdAt,
+    sellerCredentialId: sale.sellerCredentialId ?? null,
   };
 }
 
@@ -1107,6 +1125,61 @@ export async function getOpenAttendanceRecord(tenantId: string, employeeId: stri
     (item) => item.tenantId === tenantId && item.employeeId === employeeId && !item.checkOutAt,
   ) ?? null;
   return record ? attendanceRecordFromStore(record, store.users) : null;
+}
+
+function sellerCredentialFromStore(credential: StoreSellerCredential, users: StoreUser[]): SellerCredential {
+  // The token hash NEVER leaves the store boundary.
+  return {
+    id: credential.id,
+    tenantId: credential.tenantId,
+    sellerId: credential.sellerId,
+    sellerName: users.find((item) => item.id === credential.sellerId)?.fullName ?? null,
+    publicReference: credential.publicReference,
+    status: credential.status as SellerCredential['status'],
+    issuedAt: credential.issuedAt,
+    lastUsedAt: credential.lastUsedAt ?? null,
+    revokedAt: credential.revokedAt ?? null,
+    expiresAt: credential.expiresAt ?? null,
+    rotatedAt: credential.rotatedAt ?? null,
+    createdAt: credential.createdAt,
+  };
+}
+
+function saleAmendmentFromStore(amendment: StoreSaleAmendment, users: StoreUser[]): SaleAmendment {
+  return {
+    id: amendment.id,
+    tenantId: amendment.tenantId,
+    saleId: amendment.saleId,
+    previousTotal: amendment.previousTotal,
+    newTotal: amendment.newTotal,
+    reason: amendment.reason,
+    actorName: amendment.actorId
+      ? users.find((item) => item.id === amendment.actorId)?.fullName ?? null
+      : null,
+    createdAt: amendment.createdAt,
+  };
+}
+
+export async function listSellerCredentialsByTenant(tenantId: string) {
+  const store = await readStore();
+  return (store.sellerCredentials ?? [])
+    .filter((credential) => credential.tenantId === tenantId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((credential) => sellerCredentialFromStore(credential, store.users));
+}
+
+/** Internal: resolves the credential WITH its token hash for verification. */
+export async function getSellerCredentialRecordByReference(publicReference: string) {
+  const store = await readStore();
+  return (store.sellerCredentials ?? []).find((credential) => credential.publicReference === publicReference) ?? null;
+}
+
+export async function listSaleAmendmentsByTenant(tenantId: string, saleId?: string) {
+  const store = await readStore();
+  return (store.saleAmendments ?? [])
+    .filter((amendment) => amendment.tenantId === tenantId && (!saleId || amendment.saleId === saleId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((amendment) => saleAmendmentFromStore(amendment, store.users));
 }
 
 export async function listSubscriptionPackagesStore() {

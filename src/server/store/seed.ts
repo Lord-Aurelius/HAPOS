@@ -477,5 +477,8 @@ export function createSeedStore(): StoreState {
     // auto-provisioned by migration (SQL-authoritative later).
     attendanceTerminals: [],
     attendanceRecords: [],
+    // Phase 3: credentials are issued by admins only — never auto-provisioned.
+    sellerCredentials: [],
+    saleAmendments: [],
   };
 }
