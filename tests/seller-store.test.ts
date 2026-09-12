@@ -191,6 +191,32 @@ describe('touchSellerCredentialUsed', () => {
   });
 });
 
+describe('delete-as-revocation (history preservation)', () => {
+  it('revoking a credential leaves historical transactions fully intact', () => {
+    const store = testStore();
+    const { credential } = issueSellerCredential(
+      store, { tenantId: 'tenant-a', sellerId: 'seller-1' }, { generateId, bearerHex: BEARER_HEX },
+    );
+    // Historical transaction referencing the seller (never the credential row).
+    const historicalSale = { id: 'sale-old', tenantId: 'tenant-a', sellerId: 'seller-1', total: 1850 };
+    const historicalMovement = { id: 'mov-old', tenantId: 'tenant-a', productId: 'prod-x', quantity: -2 };
+
+    revokeSellerCredential(store, { tenantId: 'tenant-a', sellerId: 'seller-1' }, { generateId });
+
+    // Credential dead, history untouched: seller identity still resolves via users.
+    assert.equal(credential.status, 'REVOKED');
+    assert.deepEqual(historicalSale, { id: 'sale-old', tenantId: 'tenant-a', sellerId: 'seller-1', total: 1850 });
+    assert.deepEqual(historicalMovement, { id: 'mov-old', tenantId: 'tenant-a', productId: 'prod-x', quantity: -2 });
+    const seller = store.users.find((u) => u.id === historicalSale.sellerId);
+    assert.equal(seller?.id, 'seller-1');
+    // And revocation grants no authorization: the dead bearer verifies nothing.
+    assertSellerCode(
+      () => verifySellerCredential(store, { tenantId: 'tenant-a', reference: credential.publicReference, bearer: '0'.repeat(64) }, {}),
+      'credential-revoked',
+    );
+  });
+});
+
 describe('QR replay and device copying', () => {
   it('a persistent QR verifies repeatedly and serves many transactions', () => {
     const store = testStore();

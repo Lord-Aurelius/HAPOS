@@ -233,20 +233,24 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
           <div>
             <h2>Seller QR credentials</h2>
             <p className="panel-copy">
-              One transaction-only QR per seller. Bearers are shown once and never stored. Rotation
-              and revocation take effect immediately; past transactions stay valid.
+              One transaction-only QR per seller. Printing issues a fresh code and immediately
+              invalidates any previously printed copies — the bearer is never stored and cannot be
+              recovered, so print at once. Revoked codes stop working but past transactions stay valid.
             </p>
           </div>
         </div>
 
         {oneTimeSellerQr ? (
           <div className="stack" style={{ marginBottom: 16 }}>
-            <p className="panel-copy">Fresh seller QR — print it now. It cannot be recovered afterwards.</p>
+            <p className="panel-copy">Fresh seller QR — print or download it now. It cannot be shown again afterwards.</p>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`${oneTimeSellerQr}&format=svg`} alt="Seller QR code" style={{ maxWidth: 280 }} />
             <div className="hero-actions" style={{ marginTop: 0 }}>
               <a className="button secondary" href={`${oneTimeSellerQr}&format=png&download=1`}>
                 Download PNG
+              </a>
+              <a className="button secondary" href={`${oneTimeSellerQr}&format=svg&download=1`}>
+                Download SVG
               </a>
             </div>
           </div>
@@ -257,18 +261,19 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
             .filter((user) => user.role === 'staff' || user.role === 'shop_admin')
             .map((user) => {
               const credential = credentialBySeller.get(user.id);
+              const isActive = credential?.status === 'ACTIVE';
               return (
                 <div key={user.id} className="list-row">
                   <div>
                     <strong>{user.fullName}</strong>
                     <div className="eyebrow">
                       {credential
-                        ? `${credential.status} · issued ${credential.issuedAt.slice(0, 10)} · last used ${credential.lastUsedAt ? credential.lastUsedAt.slice(0, 16).replace('T', ' ') : 'never'}${credential.revokedAt ? ` · revoked ${credential.revokedAt.slice(0, 10)}` : ''}`
+                        ? `${isActive ? 'ACTIVE' : 'REVOKED'} · issued ${credential.issuedAt.slice(0, 10)} · last used ${credential.lastUsedAt ? credential.lastUsedAt.slice(0, 16).replace('T', ' ') : 'never'}${credential.revokedAt ? ` · revoked ${credential.revokedAt.slice(0, 10)}` : ''}`
                         : 'No QR credential'}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    {!credential || credential.status !== 'ACTIVE' ? (
+                    {!credential ? (
                       <form action={issueSellerCredentialAction}>
                         <input type="hidden" name="sellerId" value={user.id} />
                         <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
@@ -279,15 +284,15 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                       <form action={rotateSellerCredentialAction}>
                         <input type="hidden" name="sellerId" value={user.id} />
                         <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
-                          Rotate
+                          {isActive ? 'Print / Reissue QR' : 'Reissue QR'}
                         </button>
                       </form>
                     )}
-                    {credential && credential.status === 'ACTIVE' ? (
+                    {isActive ? (
                       <form action={revokeSellerCredentialAction}>
                         <input type="hidden" name="sellerId" value={user.id} />
                         <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
-                          Revoke
+                          Delete / Revoke
                         </button>
                       </form>
                     ) : null}

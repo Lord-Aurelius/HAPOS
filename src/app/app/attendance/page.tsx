@@ -86,8 +86,12 @@ export default async function AttendanceAdminPage({ searchParams }: AttendancePa
               <h2>Attendance terminal QR</h2>
               <p className="panel-copy">
                 {terminal
-                  ? `Terminal ${terminal.reference} · ${terminal.isActive ? 'active' : 'revoked'}`
+                  ? `Terminal ${terminal.reference} · ${terminal.isActive ? 'ACTIVE' : 'REVOKED'}${terminal.revokedAt ? ` since ${terminal.revokedAt.slice(0, 10)}` : ''}`
                   : 'No terminal provisioned yet.'}
+              </p>
+              <p className="panel-copy">
+                Printing issues a fresh code and immediately invalidates any previously printed
+                copies — the bearer is never stored and cannot be recovered, so print at once.
               </p>
             </div>
           </div>
@@ -95,8 +99,7 @@ export default async function AttendanceAdminPage({ searchParams }: AttendancePa
           {qrBaseHref ? (
             <div className="stack">
               <p className="panel-copy">
-                Fresh QR generated. Print it now — the bearer is shown once and cannot be recovered
-                from storage. Rotating again invalidates this code.
+                Fresh QR generated. Print or download it now — it cannot be shown again afterwards.
               </p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${qrBaseHref}&format=svg`} alt="Attendance terminal QR code" style={{ maxWidth: 320 }} />
@@ -111,33 +114,38 @@ export default async function AttendanceAdminPage({ searchParams }: AttendancePa
             </div>
           ) : (
             <p className="panel-copy">
-              Rotate the terminal to generate a printable QR code. The previous code stops working
-              immediately.
+              {terminal?.isActive
+                ? 'Print a fresh QR code below. Previously printed copies stop working immediately.'
+                : 'Generate a QR code below to activate this terminal.'}
             </p>
           )}
 
           <div className="hero-actions">
             <form action={rotateAttendanceTerminalAction}>
               <button type="submit" className="button">
-                Generate / rotate QR
+                {terminal ? 'Print / Reissue QR' : 'Generate QR'}
               </button>
             </form>
             {terminal?.isActive ? (
               <form action={setAttendanceTerminalActiveAction}>
                 <input type="hidden" name="isActive" value="false" />
                 <button type="submit" className="button secondary">
-                  Revoke terminal
+                  Delete / Revoke
                 </button>
               </form>
-            ) : (
+            ) : terminal ? (
               <form action={setAttendanceTerminalActiveAction}>
                 <input type="hidden" name="isActive" value="true" />
                 <button type="submit" className="button secondary">
-                  Reactivate terminal
+                  Reactivate (then Print / Reissue)
                 </button>
               </form>
-            )}
+            ) : null}
           </div>
+          <p className="panel-copy" style={{ marginTop: 8 }}>
+            Lifecycle: ACTIVE (QR works) → REVOKED (QR dead, history kept). Deleting never removes
+            records — it only revokes the QR.
+          </p>
         </div>
 
         <div className="panel">

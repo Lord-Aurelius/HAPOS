@@ -155,6 +155,28 @@ describe('rotateTerminal / verifyTerminalToken', () => {
     assert.doesNotThrow(() => verifyTerminalToken(store, second.terminal.reference, second.token));
   });
 
+  it('delete-as-revocation preserves attendance history', () => {
+    const store = testStore();
+    const rotated = rotateTerminal(store, { tenantId: 'tenant-a', shopSlug: 'shop-a' }, { generateId, tokenHex: TOKEN_HEX });
+    checkInEmployee(
+      store,
+      { tenantId: 'tenant-a', employeeNumber: 'EMP-0042', terminalReference: rotated.terminal.reference, timeZone: 'Africa/Nairobi' },
+      { generateId, now: '2026-05-01T05:00:00.000Z' },
+    );
+    // Delete maps to revocation: the QR dies, the record lives.
+    setTerminalActive(store, { tenantId: 'tenant-a', isActive: false }, { generateId });
+    assert.equal(store.attendanceRecords.length, 1);
+    assert.equal(store.attendanceRecords[0].status, 'CHECKED_IN');
+    assertAttendanceCode(
+      () => checkInEmployee(
+        store,
+        { tenantId: 'tenant-a', employeeNumber: 'EMP-0042', terminalReference: rotated.terminal.reference, timeZone: 'Africa/Nairobi' },
+        { generateId },
+      ),
+      'terminal-revoked',
+    );
+  });
+
   it('rejects missing, wrong and cross-context tokens', () => {
     const store = testStore();
     const rotated = rotateTerminal(store, { tenantId: 'tenant-a', shopSlug: 'shop-a' }, { generateId, tokenHex: TOKEN_HEX });
