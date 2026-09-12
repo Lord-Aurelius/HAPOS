@@ -211,14 +211,14 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
             {[0, 1, 2, 3].map((index) => (
               <div key={index} className="field-row">
                 <div className="field">
-                  <label htmlFor={`line_${index}_kind`}>Line {index + 1} type</label>
+                  <label htmlFor={`line_${index}_kind`}>Item {index + 1} — type (leave item blank to skip)</label>
                   <select id={`line_${index}_kind`} name={`line_${index}_kind`} defaultValue="service">
                     <option value="service">Service</option>
                     <option value="product">Product</option>
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor={`line_${index}_refId`}>Item</label>
+                  <label htmlFor={`line_${index}_refId`}>Item {index + 1} — product or service</label>
                   <select id={`line_${index}_refId`} name={`line_${index}_refId`} defaultValue="">
                     <option value="">—</option>
                     <optgroup label="Services">
@@ -241,15 +241,15 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor={`line_${index}_quantity`}>Qty</label>
+                  <label htmlFor={`line_${index}_quantity`}>Item {index + 1} — quantity</label>
                   <input id={`line_${index}_quantity`} name={`line_${index}_quantity`} type="number" min="0" step="1" />
                 </div>
                 <div className="field">
-                  <label htmlFor={`line_${index}_actual`}>Actual price (blank = catalog)</label>
+                  <label htmlFor={`line_${index}_actual`}>Item {index + 1} — actual price (blank = catalog)</label>
                   <input id={`line_${index}_actual`} name={`line_${index}_actual`} type="number" min="0" step="1" />
                 </div>
                 <div className="field">
-                  <label htmlFor={`line_${index}_reason`}>Override reason</label>
+                  <label htmlFor={`line_${index}_reason`}>Item {index + 1} — override reason</label>
                   <input id={`line_${index}_reason`} name={`line_${index}_reason`} placeholder="Required if price differs" />
                 </div>
               </div>

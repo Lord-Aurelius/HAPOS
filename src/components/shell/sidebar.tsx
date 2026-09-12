@@ -24,10 +24,13 @@ import {
   LogOut,
   Menu,
   X,
+  ClipboardList,
+  CalendarCheck,
+  ShoppingBag,
 } from 'lucide-react';
 
 import { HaposLogo } from '@/components/branding/hapos-logo';
-import { shopNav, superNav } from '@/lib/nav';
+import { shopNav, superNav, shopNavSections as sections } from '@/lib/nav';
 import { subscriptionIncludesMarketplace } from '@/lib/plans';
 import type { Subscription, Tenant, User } from '@/lib/types';
 
@@ -54,17 +57,12 @@ const iconMap: Record<string, typeof LayoutDashboard> = {
   '/app/subscription': Crown,
   '/app/settings/staff': UserCog,
   '/app/settings/loyalty': Heart,
+  '/app/orders': ClipboardList,
+  '/app/seller': ShoppingBag,
+  '/app/attendance': CalendarCheck,
   '/super/tenants': Building2,
   '/super/marketplace': Store,
 };
-
-const sections: Array<{ label: string; paths: string[] }> = [
-  { label: 'Overview', paths: ['/app/dashboard', '/app/ai-dashboard'] },
-  { label: 'Operations', paths: ['/app/service-entry', '/app/sales', '/app/customers', '/app/services', '/app/products'] },
-  { label: 'Commerce', paths: ['/app/marketplace', '/app/commissions', '/app/expenses'] },
-  { label: 'Reports', paths: ['/app/reports/monthly', '/app/history', '/app/sms'] },
-  { label: 'Admin', paths: ['/app/subscription', '/app/settings/staff', '/app/settings/loyalty'] },
-];
 
 export function Sidebar({ user, tenant, subscription }: SidebarProps) {
   const pathname = usePathname();

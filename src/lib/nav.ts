@@ -34,6 +34,19 @@ export const superNav: NavItem[] = [
   { href: '/super/marketplace', label: 'Marketplace', roles: ['super_admin'] },
 ];
 
+/**
+ * Sidebar section layout. Every shopNav href MUST appear in exactly one
+ * section, otherwise the link exists in navigation data but never renders
+ * (verified by tests/nav.test.ts).
+ */
+export const shopNavSections: Array<{ label: string; paths: string[] }> = [
+  { label: 'Overview', paths: ['/app/dashboard', '/app/ai-dashboard'] },
+  { label: 'Operations', paths: ['/app/service-entry', '/app/orders', '/app/seller', '/app/sales', '/app/customers', '/app/services', '/app/products'] },
+  { label: 'Commerce', paths: ['/app/marketplace', '/app/commissions', '/app/expenses'] },
+  { label: 'Reports', paths: ['/app/reports/monthly', '/app/history', '/app/sms'] },
+  { label: 'Admin', paths: ['/app/attendance', '/app/subscription', '/app/settings/staff', '/app/settings/loyalty'] },
+];
+
 export const customerNav = [
   { href: '/customer/dashboard', label: 'My Visits' },
   { href: '/customer/services', label: 'Price List' },
