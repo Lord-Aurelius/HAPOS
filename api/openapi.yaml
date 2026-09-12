@@ -6,11 +6,16 @@ info:
 servers:
   - url: https://api.example.com
 security:
-  - bearerAuth: []
+  - cookieAuth: []
 tags:
   - name: Auth
   - name: Dashboard
   - name: Services
+  - name: Catalog
+  - name: Inventory
+  - name: Orders
+  - name: Sales
+  - name: Attendance
   - name: Customers
   - name: Service Records
   - name: Expenses
@@ -18,6 +23,7 @@ tags:
   - name: SMS
   - name: Subscriptions
   - name: Super Admin
+  - name: AI
 paths:
   /v1/auth/login:
     post:
@@ -83,6 +89,25 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Service'
+    post:
+      tags: [Services]
+      summary: Create a service in the price list
+      description: Accessible to `shop_admin` and `super_admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceInput'
+      responses:
+        '201':
+          description: Service created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/products:
     get:
       tags: [Services]
@@ -102,7 +127,7 @@ paths:
     post:
       tags: [Services]
       summary: Create a product for usage-cost tracking
-      description: Accessible to `shop_admin` and `super_admin`.
+      description: Accessible to `shop_admin` and `super_admin`. Accepts full catalog fields (sku, sellingPrice, openingQuantity, reorderLevel, criticalLevel); opening stock is recorded as an OPENING_BALANCE movement.
       requestBody:
         required: true
         content:
@@ -116,23 +141,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Product'
-    post:
-      tags: [Services]
-      summary: Create a service in the price list
-      description: Accessible to `shop_admin` and `super_admin`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ServiceInput'
-      responses:
-        '201':
-          description: Service created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Service'
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /v1/services/{serviceId}:
     patch:
       tags: [Services]
@@ -332,6 +342,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceRecord'
+    delete:
+      tags: [Service Records]
+      summary: Void a service record
+      description: Accessible to `shop_admin` and `super_admin`. Soft-voids the record and cascades to any co-written commerce sale (with stock reversal).
+      parameters:
+        - $ref: '#/components/parameters/RecordId'
+      responses:
+        '200':
+          description: Record voided
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recordId:
+                    type: string
+                  nextRecordId:
+                    type: string
+                    nullable: true
+                  restoredOrderId:
+                    type: string
+                    nullable: true
+        '404':
+          $ref: '#/components/responses/NotFound'
   /v1/expenses:
     get:
       tags: [Expenses]
@@ -492,24 +526,27 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FinancialRow'
-  /v1/reports/monthly:
+  /v1/reports/export:
     get:
       tags: [Reports]
-      summary: Full monthly shop report
-      description: Accessible to `shop_admin` and `super_admin`.
+      summary: Export ledger data as JSON or CSV
+      description: Accessible to `shop_admin` and `super_admin`. `scope=platform` additionally requires `super_admin`.
       parameters:
         - in: query
-          name: month
+          name: format
           schema:
             type: string
-            format: date
+            enum: [json, csv]
+        - in: query
+          name: scope
+          schema:
+            type: string
+            enum: [tenant, platform]
       responses:
         '200':
-          description: Monthly loyalty, staff, product, and improvement report
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MonthlyReport'
+          description: Export payload
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/sms/promotions:
     post:
       tags: [SMS]
@@ -600,12 +637,656 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tenant'
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out the current session
+      responses:
+        '302':
+          description: Redirect to the login page
+  /v1/assets/{assetId}:
+    get:
+      tags: [Services]
+      summary: Fetch an uploaded image asset
+      security: []
+      parameters:
+        - in: path
+          name: assetId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Binary image bytes
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/catalog:
+    get:
+      tags: [Catalog]
+      summary: Unified sellable catalog (products + services)
+      description: Accessible to `shop_admin`, `staff` and `super_admin`. Inactive items are excluded; unpriced products expose a null catalog price.
+      responses:
+        '200':
+          description: Catalog items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogItem'
+  /v1/products/{productId}:
+    patch:
+      tags: [Catalog]
+      summary: Edit a product catalog entry
+      description: Accessible to `shop_admin` and `super_admin`. Quantity is never editable here — use inventory adjustments.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '200':
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/inventory/movements:
+    get:
+      tags: [Inventory]
+      summary: List inventory movements
+      description: Accessible to `shop_admin` and `super_admin`. Optional `productId` query narrows to one product.
+      responses:
+        '200':
+          description: Movement history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InventoryMovement'
+    post:
+      tags: [Inventory]
+      summary: Record a stock movement
+      description: Accessible to `shop_admin` and `super_admin`. Quantities are positive magnitudes; the server applies the sign. `SALE`, `SERVICE_CONSUMPTION` and `MIGRATED_USAGE` are rejected (sale engine / migration only). `ADJUSTMENT` takes `countedQuantity` plus a mandatory reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, type]
+              properties:
+                productId:
+                  type: string
+                type:
+                  type: string
+                  enum: [OPENING_BALANCE, PURCHASE, RETURN, TRANSFER_IN, DAMAGE, LOSS, TRANSFER_OUT, ADJUSTMENT]
+                quantity:
+                  type: integer
+                countedQuantity:
+                  type: integer
+                reason:
+                  type: string
+      responses:
+        '201':
+          description: Movement recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryMovement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/services/{serviceId}/consumption:
+    get:
+      tags: [Services]
+      summary: Read a service consumption definition (BOM)
+      description: Accessible to `shop_admin` and `super_admin`. A definition only — it moves no stock.
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      responses:
+        '200':
+          description: Consumption lines
+    put:
+      tags: [Services]
+      summary: Replace a service consumption definition
+      description: Accessible to `shop_admin` and `super_admin`. Body `{ lines: [{ productId, quantity }] }`. Moves no stock.
+      parameters:
+        - $ref: '#/components/parameters/ServiceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId:
+                        type: string
+                      quantity:
+                        type: integer
+      responses:
+        '200':
+          description: Consumption definition saved
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/orders:
+    get:
+      tags: [Orders]
+      summary: List commerce orders
+      description: Admins see the merchant queue; `staff` sees only their own orders. Tenant-scoped server-side.
+      responses:
+        '200':
+          description: Order list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+    post:
+      tags: [Orders]
+      summary: Create and submit an order
+      description: Accessible to `shop_admin`, `staff` and `super_admin`. Totals are recomputed server-side (`clientTotal` mismatch is rejected). Staff downward overrides route to review. Auto-approved orders finalize their sale atomically in the same call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                customerId:
+                  type: string
+                  nullable: true
+                lines:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/CartLine'
+                clientTotal:
+                  type: number
+                  nullable: true
+                notes:
+                  type: string
+                idempotencyKey:
+                  type: string
+      responses:
+        '201':
+          description: Order created (and possibly finalized)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: '#/components/schemas/Order'
+                  sale:
+                    $ref: '#/components/schemas/Sale'
+                  route:
+                    type: string
+                    enum: [PENDING_REVIEW, AUTO_APPROVE]
+                  duplicate:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/orders/{orderId}:
+    get:
+      tags: [Orders]
+      summary: Read one order with items
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/orders/{orderId}/submit:
+    post:
+      tags: [Orders]
+      summary: Submit a draft order
+      description: Moves `DRAFT → SUBMITTED`, then routes to review or auto-approval per merchant policy.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Submission route applied
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/orders/{orderId}/approve:
+    post:
+      tags: [Orders]
+      summary: Approve an order and finalize its sale
+      description: Admin-only via domain enforcement (`staff` receives 403 for pending orders). Exactly one sale per order; re-approval returns the original. Stock posts atomically; insufficient stock blocks with nothing deducted.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order approved and sale finalized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: '#/components/schemas/Order'
+                  sale:
+                    $ref: '#/components/schemas/Sale'
+                  duplicate:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/orders/{orderId}/reject:
+    post:
+      tags: [Orders]
+      summary: Reject a pending order
+      description: Admin-only via domain enforcement.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Order rejected
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/orders/{orderId}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancel an open order
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order cancelled
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/sales:
+    get:
+      tags: [Sales]
+      summary: List commerce sales
+      description: Admins see the merchant ledger; `staff` sees only their own sales.
+      responses:
+        '200':
+          description: Sale list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sale'
+  /v1/sales/{saleId}:
+    get:
+      tags: [Sales]
+      summary: Read one sale with items
+      parameters:
+        - $ref: '#/components/parameters/SaleId'
+      responses:
+        '200':
+          description: Sale detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sale'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/sales/{saleId}/void:
+    post:
+      tags: [Sales]
+      summary: Void a completed sale
+      description: Admin-only via domain enforcement. Reverses stock (`RETURN` for products, audited `ADJUSTMENT` for consumed components) and cascades to co-written legacy rows.
+      parameters:
+        - $ref: '#/components/parameters/SaleId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Sale voided
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/attendance/terminal:
+    get:
+      tags: [Attendance]
+      summary: Resolve a public attendance terminal
+      security: []
+      description: Returns the shop display name for a terminal reference. No auth; the reference itself is the unguessable bearer.
+      parameters:
+        - in: query
+          name: reference
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Terminal context
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference:
+                    type: string
+                  tenantName:
+                    type: string
+                    nullable: true
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Terminal revoked
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /v1/attendance/check-in:
+    post:
+      tags: [Attendance]
+      summary: Check an employee in
+      security: []
+      description: Public terminal operation. Requires terminal `reference` + `token` bearer and employee number. Timestamps are server-authoritative; duplicate check-ins converge safely. Throttled per terminal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reference, token, employeeNumber]
+              properties:
+                reference:
+                  type: string
+                token:
+                  type: string
+                employeeNumber:
+                  type: string
+      responses:
+        '201':
+          description: Checked in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Terminal revoked
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /v1/attendance/check-out:
+    post:
+      tags: [Attendance]
+      summary: Check an employee out
+      security: []
+      description: Public terminal operation. Requires an open record; otherwise rejected without creating one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reference, token, employeeNumber]
+              properties:
+                reference:
+                  type: string
+                token:
+                  type: string
+                employeeNumber:
+                  type: string
+      responses:
+        '200':
+          description: Checked out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /v1/attendance/me:
+    get:
+      tags: [Attendance]
+      summary: Read the caller's own attendance
+      description: Employees see only their own records (server-side filter, never a client parameter).
+      responses:
+        '200':
+          description: Own attendance records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AttendanceRecord'
+  /v1/attendance/records:
+    get:
+      tags: [Attendance]
+      summary: Read merchant attendance (admin)
+      description: Accessible to `shop_admin` and `super_admin`. Optional `date`, `employeeId`, `status` filters.
+      responses:
+        '200':
+          description: Attendance records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AttendanceRecord'
+  /v1/attendance/terminals:
+    get:
+      tags: [Attendance]
+      summary: List merchant attendance terminals
+      description: Accessible to `shop_admin` and `super_admin`. Never exposes token hashes.
+      responses:
+        '200':
+          description: Terminal list
+    post:
+      tags: [Attendance]
+      summary: Rotate the merchant terminal credential
+      description: Accessible to `shop_admin` and `super_admin`. Returns a one-time bearer for QR rendering; the previous QR stops working immediately.
+      responses:
+        '201':
+          description: Terminal rotated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reference:
+                    type: string
+                  token:
+                    type: string
+    patch:
+      tags: [Attendance]
+      summary: Activate or revoke the merchant terminal
+      description: Accessible to `shop_admin` and `super_admin`. Body `{ isActive: boolean }`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isActive]
+              properties:
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Terminal status updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/admin/tenants/{tenantId}/booking-qr:
+    get:
+      tags: [Super Admin]
+      summary: Render the customer booking QR
+      description: Accessible to `shop_admin` (own tenant) and `super_admin`. PNG/SVG via `format`; `download=1` attaches.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: QR image
+  /v1/admin/tenants/{tenantId}/attendance-qr:
+    get:
+      tags: [Super Admin]
+      summary: Render the attendance terminal QR
+      description: Accessible to `shop_admin` (own tenant) and `super_admin`. Requires the one-time `token` from rotation plus `reference`; never interchangeable with the booking QR.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - in: query
+          name: reference
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: QR image
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/ai/chat:
+    post:
+      tags: [AI]
+      summary: Conversational business intelligence
+      description: Any authenticated session. Read-only tools; never gates POS writes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+      responses:
+        '200':
+          description: Agent response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/ai/dashboard:
+    post:
+      tags: [AI]
+      summary: AI dashboard payload
+      responses:
+        '200':
+          description: Dashboard payload
+  /v1/ai/forecast:
+    post:
+      tags: [AI]
+      summary: Demand/expense forecasting
+      responses:
+        '200':
+          description: Forecast payload
+  /v1/ai/insights:
+    post:
+      tags: [AI]
+      summary: Generated business insights
+      responses:
+        '200':
+          description: Insight list
+  /v1/ai/opportunities:
+    post:
+      tags: [AI]
+      summary: Detected opportunities
+      responses:
+        '200':
+          description: Opportunity list
+  /v1/ai/risks:
+    post:
+      tags: [AI]
+      summary: Detected risks
+      responses:
+        '200':
+          description: Risk list
+  /v1/ai/health:
+    get:
+      tags: [AI]
+      summary: AI provider health
+      responses:
+        '200':
+          description: Health payload
+  /v1/ai/providers:
+    get:
+      tags: [AI]
+      summary: Configured AI providers
+      responses:
+        '200':
+          description: Provider list
+  /v1/ai/tools:
+    get:
+      tags: [AI]
+      summary: Registered AI tool catalog
+      responses:
+        '200':
+          description: Tool catalog
+    post:
+      tags: [AI]
+      summary: Execute an AI tool call
+      responses:
+        '200':
+          description: Tool result
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: hapos_session
+      description: Opaque session cookie issued by POST /v1/auth/login. Public terminal endpoints use their own bearer instead.
   parameters:
     TenantId:
       in: path
@@ -642,7 +1323,67 @@ components:
       schema:
         type: string
         format: uuid
+    OrderId:
+      in: path
+      name: orderId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SaleId:
+      in: path
+      name: saleId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProductId:
+      in: path
+      name: productId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AssetId:
+      in: path
+      name: assetId
+      required: true
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Record not found in this tenant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but not permitted for this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Rate limited
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
     LoginRequest:
       type: object
       required: [businessSlug, username, password]
@@ -773,6 +1514,25 @@ components:
           type: string
         unitCost:
           type: number
+          description: Acquisition cost basis (never renamed).
+        sellingPrice:
+          type: number
+          nullable: true
+          description: Null means needs_pricing.
+        sku:
+          type: string
+          nullable: true
+        skuGenerated:
+          type: boolean
+        quantityOnHand:
+          type: integer
+          description: Maintained balance; 0 on legacy rows means uncounted, never inferred.
+        reorderLevel:
+          type: integer
+          nullable: true
+        criticalLevel:
+          type: integer
+          nullable: true
         description:
           type: string
           nullable: true
@@ -788,6 +1548,19 @@ components:
           type: number
         description:
           type: string
+        sku:
+          type: string
+          description: Optional; unique per tenant when present.
+        sellingPrice:
+          type: number
+          description: Optional; blank means needs_pricing.
+        openingQuantity:
+          type: integer
+          description: Recorded as an OPENING_BALANCE movement, never a bare assignment.
+        reorderLevel:
+          type: integer
+        criticalLevel:
+          type: integer
         isActive:
           type: boolean
     ServiceInput:
@@ -1178,3 +1951,222 @@ components:
           type: array
           items:
             type: string
+    CatalogItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [product, service]
+        name:
+          type: string
+        catalogPrice:
+          type: number
+          nullable: true
+        isActive:
+          type: boolean
+        sku:
+          type: string
+          nullable: true
+        quantityOnHand:
+          type: integer
+          nullable: true
+        stockStatus:
+          type: string
+          nullable: true
+          enum: [out_of_stock, critical, low, in_stock]
+    InventoryMovement:
+      type: object
+      properties:
+        id:
+          type: string
+        productId:
+          type: string
+        quantity:
+          type: integer
+          description: Signed delta; positive in, negative out.
+        movementType:
+          type: string
+          enum: [OPENING_BALANCE, PURCHASE, SALE, SERVICE_CONSUMPTION, RETURN, ADJUSTMENT, DAMAGE, LOSS, TRANSFER_IN, TRANSFER_OUT, MIGRATED_USAGE]
+        referenceType:
+          type: string
+          nullable: true
+        referenceId:
+          type: string
+          nullable: true
+        previousQuantity:
+          type: integer
+        resultingQuantity:
+          type: integer
+        reason:
+          type: string
+          nullable: true
+        createdBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+    CartLine:
+      type: object
+      required: [kind, refId, quantity]
+      properties:
+        kind:
+          type: string
+          enum: [product, service]
+        refId:
+          type: string
+        quantity:
+          type: integer
+        actualUnitPrice:
+          type: number
+          nullable: true
+        overrideReason:
+          type: string
+          nullable: true
+    OrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+        itemType:
+          type: string
+          enum: [PRODUCT, SERVICE]
+        productId:
+          type: string
+          nullable: true
+        serviceId:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+        catalogUnitPrice:
+          type: number
+        actualUnitPrice:
+          type: number
+        lineTotal:
+          type: number
+        itemName:
+          type: string
+        commissionType:
+          type: string
+        commissionValue:
+          type: number
+        commissionAmount:
+          type: number
+        overrideReason:
+          type: string
+          nullable: true
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
+        sellerId:
+          type: string
+          nullable: true
+        sellerName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [DRAFT, SUBMITTED, PENDING_REVIEW, APPROVED, COMPLETED, CANCELLED, REJECTED]
+        subtotal:
+          type: number
+        total:
+          type: number
+        source:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        createdAt:
+          type: string
+    Sale:
+      type: object
+      properties:
+        id:
+          type: string
+        orderId:
+          type: string
+        customerName:
+          type: string
+          nullable: true
+        sellerName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, VOIDED]
+        subtotal:
+          type: number
+        total:
+          type: number
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        completedAt:
+          type: string
+          nullable: true
+        voidedAt:
+          type: string
+          nullable: true
+        voidReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+    AttendanceRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+          nullable: true
+        employeeNumberSnapshot:
+          type: string
+        attendanceDate:
+          type: string
+          format: date
+        checkInAt:
+          type: string
+        checkOutAt:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [CHECKED_IN, CHECKED_OUT]
+        terminalReference:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+    AttendanceTerminal:
+      type: object
+      description: Never exposes token hashes.
+      properties:
+        id:
+          type: string
+        reference:
+          type: string
+        isActive:
+          type: boolean
+        revokedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
