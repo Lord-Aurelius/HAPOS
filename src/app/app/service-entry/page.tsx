@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { FormSubmitButton } from '@/components/ui/form-submit-button';
 import { toDateTimeInputValue } from '@/lib/date-time';
 import { formatCurrency } from '@/lib/format';
+import { formatWorkedDuration } from '@/server/commerce/attendance';
 import { recordServiceAction, updateCustomerOrderStatusAction } from '@/server/actions/hapos';
 import { requireSession } from '@/server/auth/demo-session';
+import { getOpenAttendanceRecord, listAttendanceRecordsByTenant } from '@/server/store';
 import { getStaffMetrics, listCustomerOrders, listCustomers, listProducts, listServices, listUsers } from '@/server/services/app-data';
 
 type ServiceEntryPageProps = {
@@ -27,6 +29,12 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
     listProducts(tenant.id),
     getStaffMetrics(tenant.id, session.user.id),
   ]);
+  // Staff portal attendance: own open record + today's own history (read-only).
+  const [openAttendance, ownAttendance] = await Promise.all([
+    getOpenAttendanceRecord(tenant.id, session.user.id),
+    listAttendanceRecordsByTenant(tenant.id, { employeeId: session.user.id }),
+  ]);
+  const todayAttendance = ownAttendance.filter((record) => record.status === 'CHECKED_OUT').slice(0, 3);
   const staff = users.filter((user) => user.role === 'staff' || user.role === 'shop_admin');
   const hasServices = services.length > 0;
   // One idempotency key per render: double-click / network retry resubmits the
@@ -207,6 +215,32 @@ export default async function ServiceEntryPage({ searchParams }: ServiceEntryPag
               <strong>{formatCurrency(metrics.monthSales)}</strong>
               <div className="eyebrow">{formatCurrency(metrics.monthCommission)} earned</div>
             </div>
+          </div>
+          <div>
+            <h4>Your attendance today</h4>
+            {openAttendance ? (
+              <div className="list-row">
+                <div>
+                  <strong>Checked in</strong>
+                  <div className="eyebrow">{openAttendance.checkInAt.slice(0, 16).replace('T', ' ')}</div>
+                </div>
+                <div className="eyebrow">Open · {openAttendance.employeeNumberSnapshot}</div>
+              </div>
+            ) : todayAttendance.length > 0 ? (
+              <div className="stack">
+                {todayAttendance.map((record) => (
+                  <div key={record.id} className="list-row">
+                    <div>
+                      <strong>Checked out</strong>
+                      <div className="eyebrow">{record.checkInAt.slice(0, 16).replace('T', ' ')}</div>
+                    </div>
+                    <div className="eyebrow">{formatWorkedDuration(record.checkInAt, record.checkOutAt)}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="eyebrow">No attendance recorded yet. Use the shop attendance QR to check in.</div>
+            )}
           </div>
           <div>
             <h4>Recent customers</h4>

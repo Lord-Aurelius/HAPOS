@@ -56,3 +56,14 @@ export function buildSellerTransactionUrl(token: string, env?: NodeJS.ProcessEnv
   const baseUrl = getPublicAppBaseUrl(env);
   return baseUrl ? `${baseUrl}${path}` : path;
 }
+
+/**
+ * Attendance terminal URL (Phase 2A). The reference is public; `token` is the
+ * revocable terminal bearer embedded in the QR payload. It authenticates the
+ * terminal context ONLY — never an employee, session, or admin capability.
+ */
+export function buildAttendanceTerminalUrl(reference: string, token: string, env?: NodeJS.ProcessEnv): string {
+  const path = `/attendance/${reference}?k=${encodeURIComponent(token)}`;
+  const baseUrl = getPublicAppBaseUrl(env);
+  return baseUrl ? `${baseUrl}${path}` : path;
+}

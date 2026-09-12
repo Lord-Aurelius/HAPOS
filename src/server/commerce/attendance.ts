@@ -128,7 +128,7 @@ export function merchantDateOf(timestampISO: string, timeZone: string): string {
 
 // ── Duration ─────────────────────────────────────────────────────────────────
 
-export function workedMinutes(checkInAt: string, checkOutAt: string | null, nowISO?: string): number | null {
+export function workedMinutes(checkInAt: string, checkOutAt: string | null | undefined, nowISO?: string): number | null {
   const end = checkOutAt ?? nowISO ?? null;
   if (!end) {
     return null;
@@ -137,7 +137,7 @@ export function workedMinutes(checkInAt: string, checkOutAt: string | null, nowI
   return minutes >= 0 ? minutes : 0;
 }
 
-export function formatWorkedDuration(checkInAt: string, checkOutAt: string | null, nowISO?: string): string {
+export function formatWorkedDuration(checkInAt: string, checkOutAt: string | null | undefined, nowISO?: string): string {
   const minutes = workedMinutes(checkInAt, checkOutAt, nowISO);
   if (minutes === null) {
     return '—';

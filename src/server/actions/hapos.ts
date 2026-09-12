@@ -46,6 +46,7 @@ import {
 } from '@/server/commerce/inventory-store';
 import { InventoryError } from '@/server/commerce/inventory';
 import { CommerceError } from '@/server/commerce/orders';
+import { assertValidEmployeeNumber, normalizeEmployeeNumber } from '@/server/commerce/attendance';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
 import { voidServiceRecord } from '@/server/store/service-records';
@@ -1575,6 +1576,7 @@ export async function addUserAction(formData: FormData) {
   const username = formString(formData, 'username');
   const email = formString(formData, 'email');
   const passwordText = formString(formData, 'password');
+  const employeeNumberRaw = formString(formData, 'employeeNumber');
   const store = await readStore();
   const usernameExists = store.users.some(
     (user) => user.tenantId === tenantId && user.username.toLowerCase() === username.toLowerCase(),
@@ -1585,6 +1587,30 @@ export async function addUserAction(formData: FormData) {
 
   if (usernameExists || emailExists) {
     redirect(errorPath);
+  }
+
+  // Phase 2A: optional employee number, validated and unique per tenant.
+  let employeeNumber: string | null = null;
+  if (employeeNumberRaw) {
+    try {
+      employeeNumber = assertValidEmployeeNumber(normalizeEmployeeNumber(employeeNumberRaw));
+    } catch {
+      redirect(
+        session.user.role === 'super_admin'
+          ? '/super/tenants?error=invalid-employee-number'
+          : '/app/settings/staff?error=invalid-employee-number',
+      );
+    }
+    const numberExists = store.users.some(
+      (user) => user.tenantId === tenantId && (user.employeeNumber ?? '').toUpperCase() === employeeNumber,
+    );
+    if (numberExists) {
+      redirect(
+        session.user.role === 'super_admin'
+          ? '/super/tenants?error=invalid-employee-number'
+          : '/app/settings/staff?error=invalid-employee-number',
+      );
+    }
   }
 
   if (!passwordText) {
@@ -1606,6 +1632,7 @@ export async function addUserAction(formData: FormData) {
       phone: formString(formData, 'phone'),
       password: hashPassword(passwordText),
       passwordUpdatedAt: new Date().toISOString(),
+      employeeNumber,
       isActive: true,
       commissionType,
       commissionValue: formNumber(formData, 'commissionValue'),

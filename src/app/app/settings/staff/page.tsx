@@ -1,4 +1,5 @@
 import { addUserAction, setUserPasswordAction, setUserStatusAction, updateStaffTermsAction } from '@/server/actions/hapos';
+import { setEmployeeNumberAction } from '@/server/actions/attendance';
 import { requireSession } from '@/server/auth/demo-session';
 import { listUsers } from '@/server/services/app-data';
 import { listCredentialRecordsForTenant } from '@/server/services/admin-tools';
@@ -40,8 +41,14 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                   ? 'Employee access updated.'
                   : params.success === 'password-updated'
                     ? 'Password updated.'
-                    : params.error === 'password-required'
-                      ? 'Enter a password before saving.'
+              : params.error === 'password-required'
+                ? 'Enter a password before saving.'
+              : params.error === 'invalid-employee-number'
+                ? 'Enter a valid, unique employee number (letters, numbers and hyphens, 3–16 characters).'
+              : params.error === 'unknown-employee'
+                ? 'That employee was not found for this shop.'
+              : params.success === 'employee-number-saved'
+                ? 'Employee number saved for attendance.'
                   : 'Staff settings saved.'}
           </span>
         </section>
@@ -72,6 +79,10 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
             <div className="field">
               <label htmlFor="phone">Phone</label>
               <input id="phone" name="phone" />
+            </div>
+            <div className="field">
+              <label htmlFor="employeeNumber">Employee number (optional, for attendance)</label>
+              <input id="employeeNumber" name="employeeNumber" placeholder="EMP-0005" />
             </div>
             <div className="field">
               <label htmlFor="password">Password</label>
@@ -169,6 +180,28 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
               </button>
             </div>
           </form>
+
+          <form action={setEmployeeNumberAction} className="field-grid" style={{ marginTop: 20 }}>
+            <div className="field">
+              <label htmlFor="userIdNumber">Employee</label>
+              <select id="userIdNumber" name="userId">
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName}{user.employeeNumber ? ` (${user.employeeNumber})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="employeeNumberUpdate">Employee number (blank clears)</label>
+              <input id="employeeNumberUpdate" name="employeeNumber" placeholder="EMP-0005" />
+            </div>
+            <div className="hero-actions">
+              <button type="submit" className="button secondary">
+                Save employee number
+              </button>
+            </div>
+          </form>
         </div>
       </section>
 
@@ -185,6 +218,7 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
             <tr>
               <th>Name</th>
               <th>Username</th>
+              <th>Employee No</th>
               <th>Email</th>
               <th>Role</th>
               <th>Password status</th>
@@ -197,6 +231,7 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
               <tr key={user.userId}>
                 <td>{user.fullName}</td>
                 <td>{user.username}</td>
+                <td>{users.find((candidate) => candidate.id === user.userId)?.employeeNumber ?? '—'}</td>
                 <td>{user.email}</td>
                 <td>{user.role}</td>
                 <td>{user.passwordUpdatedAt ? `Updated ${user.passwordUpdatedAt.slice(0, 10)}` : 'Reset required'}</td>

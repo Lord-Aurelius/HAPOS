@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildAttendanceTerminalUrl,
   buildCustomerBookingUrl,
   buildSellerTransactionUrl,
   getPublicAppBaseUrl,
@@ -51,5 +52,10 @@ describe('URL builders share one configuration', () => {
 
   it('builds future seller-transaction URLs from the same base', () => {
     assert.equal(buildSellerTransactionUrl('token-abc', env), 'https://shop.example.com/sell/token-abc');
+  });
+
+  it('builds attendance terminal URLs carrying reference and bearer', () => {
+    const url = buildAttendanceTerminalUrl('att-shop-abc123', 'tokendata', env);
+    assert.equal(url, 'https://shop.example.com/attendance/att-shop-abc123?k=tokendata');
   });
 });
