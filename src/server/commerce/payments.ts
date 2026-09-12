@@ -129,3 +129,19 @@ export function buildPaymentIdempotencyKey(orderId: string, attempt: number): st
   }
   return `pay-${orderId}-${attempt}`;
 }
+
+/**
+ * Mask an E.164 phone for display (`+254712345678` → `+254712***678`).
+ * Full numbers never leave the store boundary except inside server-side
+ * provider calls. Lists, receipts and admin views show the masked form.
+ */
+export function maskCustomerPhone(phone: string | null | undefined): string | null {
+  if (!phone) {
+    return null;
+  }
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 10) {
+    return '***';
+  }
+  return `+${digits.slice(0, 6)}***${digits.slice(-3)}`;
+}

@@ -480,5 +480,7 @@ export function createSeedStore(): StoreState {
     // Phase 3: credentials are issued by admins only — never auto-provisioned.
     sellerCredentials: [],
     saleAmendments: [],
+    // Phase 4: payments start empty (SQL-authoritative later).
+    payments: [],
   };
 }

@@ -467,6 +467,34 @@ export type StoreSaleAmendment = {
   createdAt: string;
 };
 
+export type StorePayment = {
+  id: string;
+  tenantId: string;
+  orderId?: string | null;
+  saleId?: string | null;
+  provider: string;
+  method: string;
+  status: string;
+  amount: number;
+  currencyCode: string;
+  customerPhone?: string | null;
+  providerReference?: string | null;
+  providerRequestId?: string | null;
+  idempotencyKey?: string | null;
+  attemptNumber: number;
+  initiatedAt: string;
+  confirmedAt?: string | null;
+  failedAt?: string | null;
+  expiresAt?: string | null;
+  failureCode?: string | null;
+  failureReason?: string | null;
+  needsRecovery?: boolean;
+  recoveryReason?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StoreState = {
   tenants: StoreTenant[];
   users: StoreUser[];
@@ -500,4 +528,6 @@ export type StoreState = {
   // Credential rows carry tokenHash only — same one-time-bearer ceremony.
   sellerCredentials: StoreSellerCredential[];
   saleAmendments: StoreSaleAmendment[];
+  // Phase 4 transitional projection (SQL-authoritative: phase-04-payments).
+  payments: StorePayment[];
 };

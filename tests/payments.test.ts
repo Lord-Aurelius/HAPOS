@@ -8,6 +8,7 @@ import {
   buildPaymentIdempotencyKey,
   isPaymentExpired,
   isTerminalPaymentStatus,
+  maskCustomerPhone,
   transitionPaymentStatus,
 } from '../src/server/commerce/payments.ts';
 
@@ -84,5 +85,14 @@ describe('isPaymentExpired / buildPaymentIdempotencyKey', () => {
     assert.equal(buildPaymentIdempotencyKey('order-1', 1), buildPaymentIdempotencyKey('order-1', 1));
     assert.notEqual(buildPaymentIdempotencyKey('order-1', 1), buildPaymentIdempotencyKey('order-1', 2));
     assertPaymentCode(() => buildPaymentIdempotencyKey('order-1', 0), 'invalid-amount');
+  });
+});
+
+describe('maskCustomerPhone', () => {
+  it('masks display numbers while preserving routability hints', () => {
+    assert.equal(maskCustomerPhone('+254712345678'), '+254712***678');
+    assert.equal(maskCustomerPhone(null), null);
+    assert.equal(maskCustomerPhone(''), null);
+    assert.equal(maskCustomerPhone('123'), '***');
   });
 });

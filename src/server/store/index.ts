@@ -13,6 +13,7 @@ import type {
   InventoryMovement,
   Order,
   OrderItem,
+  Payment,
   Product,
   ProductUsage,
   Sale,
@@ -31,6 +32,7 @@ import { formatPlanCode, getDefaultSubscriptionPackageBlueprints, isPlatinumPlan
 import { normalizeStoreAssetReferences } from '@/server/assets';
 import { getDatabaseConfigHint } from '@/server/db/config';
 import { getPool } from '@/server/db/client';
+import { maskCustomerPhone } from '@/server/commerce/payments';
 import { buildTerminalReference, hashTerminalToken } from '@/server/commerce/attendance';
 import { ensureCatalogProjection } from '@/server/commerce/inventory-store';
 import { getRuntimeBackend } from '@/server/runtime';
@@ -47,6 +49,7 @@ import type {
   StoreLoyaltyProgram,
   StoreOrder,
   StoreOrderItem,
+  StorePayment,
   StoreProduct,
   StoreSale,
   StoreSaleAmendment,
@@ -492,6 +495,12 @@ function migrateStoreState(parsed: StoreState) {
 
   if (!Array.isArray(parsed.saleAmendments)) {
     parsed.saleAmendments = [];
+    changed = true;
+  }
+
+  // Phase 4 projection: payments start empty (SQL-authoritative).
+  if (!Array.isArray(parsed.payments)) {
+    parsed.payments = [];
     changed = true;
   }
 
@@ -1188,6 +1197,54 @@ export async function listSaleAmendmentsByTenant(tenantId: string, saleId?: stri
     .filter((amendment) => amendment.tenantId === tenantId && (!saleId || amendment.saleId === saleId))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((amendment) => saleAmendmentFromStore(amendment, store.users));
+}
+
+function paymentFromStore(payment: StorePayment): Payment {
+  return {
+    id: payment.id,
+    tenantId: payment.tenantId,
+    orderId: payment.orderId ?? null,
+    saleId: payment.saleId ?? null,
+    provider: payment.provider,
+    method: payment.method,
+    status: payment.status as Payment['status'],
+    amount: payment.amount,
+    currencyCode: payment.currencyCode,
+    // Masked at the read boundary: full numbers stay inside server-side
+    // provider calls and never reach lists, receipts or admin views.
+    customerPhone: maskCustomerPhone(payment.customerPhone ?? null),
+    providerReference: payment.providerReference ?? null,
+    providerRequestId: payment.providerRequestId ?? null,
+    attemptNumber: payment.attemptNumber,
+    initiatedAt: payment.initiatedAt,
+    confirmedAt: payment.confirmedAt ?? null,
+    failedAt: payment.failedAt ?? null,
+    expiresAt: payment.expiresAt ?? null,
+    failureCode: payment.failureCode ?? null,
+    failureReason: payment.failureReason ?? null,
+    needsRecovery: payment.needsRecovery ?? false,
+    createdAt: payment.createdAt,
+  };
+}
+
+export async function listPaymentsByTenant(
+  tenantId: string,
+  filters: { orderId?: string; status?: string; needsRecovery?: boolean } = {},
+) {
+  const store = await readStore();
+  return (store.payments ?? [])
+    .filter((payment) => payment.tenantId === tenantId)
+    .filter((payment) => !filters.orderId || payment.orderId === filters.orderId)
+    .filter((payment) => !filters.status || payment.status === filters.status)
+    .filter((payment) => filters.needsRecovery === undefined || (payment.needsRecovery ?? false) === filters.needsRecovery)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map(paymentFromStore);
+}
+
+export async function getPaymentById(tenantId: string, paymentId: string) {
+  const store = await readStore();
+  const payment = (store.payments ?? []).find((item) => item.id === paymentId && item.tenantId === tenantId) ?? null;
+  return payment ? paymentFromStore(payment) : null;
 }
 
 export async function listSubscriptionPackagesStore() {

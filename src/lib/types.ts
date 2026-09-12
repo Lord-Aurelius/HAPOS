@@ -252,6 +252,32 @@ export type SaleAmendment = {
   createdAt: string;
 };
 
+export type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'EXPIRED' | 'CANCELLED';
+
+export type Payment = {
+  id: string;
+  tenantId: string;
+  orderId?: string | null;
+  saleId?: string | null;
+  provider: string;
+  method: string;
+  status: PaymentStatus;
+  amount: number;
+  currencyCode: string;
+  customerPhone?: string | null;
+  providerReference?: string | null;
+  providerRequestId?: string | null;
+  attemptNumber: number;
+  initiatedAt: string;
+  confirmedAt?: string | null;
+  failedAt?: string | null;
+  expiresAt?: string | null;
+  failureCode?: string | null;
+  failureReason?: string | null;
+  needsRecovery?: boolean;
+  createdAt: string;
+};
+
 export type OrderStatus =
   | 'DRAFT'
   | 'SUBMITTED'
