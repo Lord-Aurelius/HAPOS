@@ -44,6 +44,8 @@ export type CommerceErrorCode =
   | 'total-mismatch'
   | 'invalid-transition'
   | 'override-reason-required'
+  | 'not-permitted'
+  | 'insufficient-stock'
   | 'already-approved'
   | 'already-voided';
 
