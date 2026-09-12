@@ -18,8 +18,8 @@ import {
   postInventoryMovement as postInventoryMovementOp,
   postOpeningBalance as postOpeningBalanceOp,
 } from '@/server/commerce/inventory-store';
+import { applyMovement, resolveServiceConsumption } from '@/server/commerce/inventory';
 import {
-  amendEngineSaleForCorrection,
   approveOrder as approveOrderOp,
   cancelOrder as cancelOrderOp,
   createOrder as createOrderOp,
@@ -55,7 +55,10 @@ import type {
 import { readStore, updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
 import { voidServiceRecord } from '@/server/store/service-records';
-import { orderFromStore, saleFromStore } from '@/server/store/index';
+import {
+  orderFromStore,
+  saleFromStore,
+} from '@/server/store/index';
 import type { Order as OrderView, Sale as SaleView } from '@/lib/types';
 
 function asCommerceStore(store: StoreState): CommerceStore {
@@ -424,21 +427,146 @@ export class FileCommerceRepository implements CommerceRepository {
   ) {
     void ctx;
     return updateStore((store) => {
-      // Resolve the linked legacy row (correction flows address it); engine-
-      // native sales without one amend directly by sale id below.
-      const linked = (store.serviceRecords ?? []).find(
-        (item) => item.tenantId === input.tenantId && item.commerceSaleId === input.saleId,
-      ) ?? null;
-      if (!linked) {
-        throw new CommerceError('unknown-item', 'No linked legacy record for that sale.');
+      const commerce = asCommerceStore(store);
+      const reason = (input.reason ?? '').trim();
+      if (!reason) {
+        throw new CommerceError('amendment-reason-required', 'Corrections to linked sales need a reason.');
       }
-      return amendEngineSaleForCorrection(asCommerceStore(store), {
+      const sale = (store.sales ?? []).find((item) => item.id === input.saleId && item.tenantId === input.tenantId) ?? null;
+      if (!sale) {
+        throw new CommerceError('unknown-item', 'Sale not found for this shop.');
+      }
+      if (sale.status !== 'COMPLETED') {
+        throw new CommerceError('invalid-transition', 'Only completed sales can be amended.');
+      }
+      const items = (store.saleItems ?? []).filter((item) => item.saleId === sale.id && item.tenantId === input.tenantId);
+      if (items.length !== 1 || items[0].itemType !== 'SERVICE') {
+        throw new CommerceError('invalid-transition', 'That engine sale has unexpected lines for amendment.');
+      }
+      const item = items[0];
+      const now = ctx.now ?? new Date().toISOString();
+      const fieldChanges: { field: string; previous: unknown; current: unknown }[] = [];
+      const track = (field: string, previous: unknown, current: unknown) => {
+        if (JSON.stringify(previous) !== JSON.stringify(current)) {
+          fieldChanges.push({ field, previous, current });
+        }
+      };
+      const previousTotal = sale.total;
+      track('actualUnitPrice', item.actualUnitPrice, input.corrected.price);
+      track('commissionAmount', item.commissionAmount, input.corrected.commissionAmount);
+
+      let stockSynced = false;
+      if ((item.serviceId ?? null) !== (input.corrected.serviceId ?? null)) {
+        const links = (store.serviceProductLinks ?? []).map((link) => ({
+          serviceId: link.serviceId,
+          tenantId: link.tenantId,
+          productId: link.productId,
+          quantity: link.quantity,
+        }));
+        const consumed = ((item.itemSnapshot ?? {}) as Record<string, unknown>).consumedProducts as { productId: string; quantity: number }[] | undefined ?? [];
+        const { resolveServiceConsumption } = require('@/server/commerce/inventory') as typeof import('@/server/commerce/inventory');
+        const { applyMovement } = require('@/server/commerce/inventory') as typeof import('@/server/commerce/inventory');
+        const fresh = resolveServiceConsumption(links, input.tenantId, input.corrected.serviceId ?? '', item.quantity);
+        for (const line of fresh) {
+          const product = store.products.find((p) => p.id === line.productId && p.tenantId === input.tenantId) ?? null;
+          const onHand = product?.quantityOnHand ?? 0;
+          if (!product || (!ctx.allowNegative && onHand - line.quantity < 0)) {
+            throw new CommerceError('insufficient-stock', 'Insufficient stock to restate this sale to the new service. Nothing was changed.');
+          }
+          void applyMovement;
+        }
+        track('serviceId', item.serviceId, input.corrected.serviceId);
+        for (const line of consumed) {
+          const product = store.products.find((p) => p.id === line.productId && p.tenantId === input.tenantId) ?? null;
+          if (!product) {
+            throw new CommerceError('unknown-item', 'A product required by this correction is missing.');
+          }
+          const app = applyMovement(product.quantityOnHand ?? 0, { type: 'ADJUSTMENT', quantity: line.quantity }, { allowNegative: true });
+          const { randomUUID } = require('node:crypto') as typeof import('node:crypto');
+          store.inventoryMovements ??= [];
+          store.inventoryMovements.push({
+            id: ctx.generateId ? ctx.generateId() : randomUUID(),
+            tenantId: sale.tenantId,
+            productId: line.productId,
+            quantity: line.quantity,
+            movementType: 'ADJUSTMENT',
+            referenceType: 'sale_correction',
+            referenceId: sale.id,
+            unitCost: product.unitCost ?? null,
+            previousQuantity: app.previousQuantity,
+            resultingQuantity: app.resultingQuantity,
+            reason: `Correction restatement for sale ${sale.id}`,
+            createdBy: input.actorId,
+            createdAt: now,
+          });
+          product.quantityOnHand = app.resultingQuantity;
+        }
+        for (const line of fresh) {
+          const product = store.products.find((p) => p.id === line.productId && p.tenantId === input.tenantId) ?? null;
+          if (!product) {
+            throw new CommerceError('unknown-item', 'A product required by this correction is missing.');
+          }
+          const app = applyMovement(product.quantityOnHand ?? 0, { type: 'SERVICE_CONSUMPTION', quantity: -line.quantity });
+          const { randomUUID } = require('node:crypto') as typeof import('node:crypto');
+          store.inventoryMovements ??= [];
+          store.inventoryMovements.push({
+            id: ctx.generateId ? ctx.generateId() : randomUUID(),
+            tenantId: sale.tenantId,
+            productId: line.productId,
+            quantity: -line.quantity,
+            movementType: 'SERVICE_CONSUMPTION',
+            referenceType: 'sale_correction',
+            referenceId: sale.id,
+            unitCost: product.unitCost ?? null,
+            previousQuantity: app.previousQuantity,
+            resultingQuantity: app.resultingQuantity,
+            reason: null,
+            createdBy: input.actorId,
+            createdAt: now,
+          });
+          product.quantityOnHand = app.resultingQuantity;
+        }
+        item.serviceId = input.corrected.serviceId;
+        item.itemName = input.corrected.serviceName;
+        const correctedService = input.corrected.serviceId
+          ? store.services.find((s) => s.id === input.corrected.serviceId && s.tenantId === input.tenantId) ?? null
+          : null;
+        item.itemSnapshot = {
+          ...((item.itemSnapshot ?? {}) as Record<string, unknown>),
+          durationMinutes: (correctedService as { durationMinutes?: number } | null)?.durationMinutes ?? (item.itemSnapshot as Record<string, unknown>).durationMinutes ?? null,
+          consumedProducts: fresh,
+        };
+        stockSynced = true;
+      }
+
+      item.actualUnitPrice = input.corrected.price;
+      item.lineTotal = input.corrected.price * item.quantity;
+      item.commissionType = input.corrected.commissionType;
+      item.commissionValue = input.corrected.commissionValue;
+      item.commissionAmount = input.corrected.commissionAmount;
+
+      sale.subtotal = (store.saleItems ?? [])
+        .filter((entry) => entry.saleId === sale.id && entry.tenantId === sale.tenantId)
+        .reduce((sum, entry) => sum + entry.lineTotal, 0);
+      sale.total = sale.subtotal;
+      sale.updatedAt = now;
+      track('total', previousTotal, sale.total);
+
+      const { randomUUID } = require('node:crypto') as typeof import('node:crypto');
+      store.saleAmendments ??= [];
+      store.saleAmendments.push({
+        id: ctx.generateId ? ctx.generateId() : randomUUID(),
         tenantId: input.tenantId,
-        legacyRecordId: linked.id,
-        corrected: input.corrected,
+        saleId: sale.id,
+        previousTotal,
+        newTotal: sale.total,
+        fieldChanges,
+        reason,
         actorId: input.actorId,
-        reason: input.reason ?? null,
+        createdAt: now,
       });
+
+      return { amended: true, sale: sale as unknown as OpsSale, stockSynced };
     });
   }
 

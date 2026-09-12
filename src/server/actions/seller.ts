@@ -22,7 +22,7 @@ import { SaleValidationError, parseKenyanPhoneInput } from '@/server/commerce/sa
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
 import type { CommerceStore } from '@/server/commerce/commerce-store';
 import { getCommerceRepository } from '@/server/commerce/repository-select';
-import { getCallbackBaseUrl, getPaymentGateway, initiateMpesaPayment, recordCashPayment } from '@/server/payments/payment-service';
+import { getCallbackBaseUrl, getPaymentGateway, initiateMpesaPayment, recordCashPayment, retryMpesaPayment } from '@/server/payments/payment-service';
 import { PaymentError } from '@/server/commerce/payments';
 import { GatewayError } from '@/server/payments/gateway';
 import { readStore, updateStore } from '@/server/store';
@@ -254,6 +254,46 @@ export async function submitSellerQrOrderAction(formData: FormData) {
     const receipt = finalizedSaleId ? `&saleId=${finalizedSaleId}` : '';
     redirect(
       `/sell/${reference}?k=${encodeURIComponent(bearer)}&orderId=${created.order.id}${receipt}&success=order-created`,
+    );
+  } catch (error) {
+    redirect(`/sell/${reference}?error=${sellerErrorCode(error)}`);
+  }
+}
+
+/**
+ * Retry M-Pesa on the seller's own held order (new attempt, same order —
+ * never a duplicate sale). Credential context only; no login required.
+ */
+export async function retrySellerQrPaymentAction(formData: FormData) {
+  const reference = formString(formData, 'reference');
+  const bearer = formString(formData, 'bearer');
+  const orderId = formString(formData, 'orderId');
+
+  if (!checkSellerRateLimit(reference || 'unknown')) {
+    redirect(`/sell/${reference}?error=rate-limited`);
+  }
+
+  try {
+    const repo = getCommerceRepository();
+    const tenantId = await repo.resolveSellerCredentialTenant(reference);
+    if (!tenantId) {
+      throw new SellerError('invalid-reference', 'This seller QR code is not recognized.');
+    }
+    const context = await repo.verifySellerCredential(tenantId, reference, bearer);
+    const order = await repo.getOrderView(tenantId, orderId);
+    if (!order || order.sellerId !== context.sellerId) {
+      throw new SellerError('invalid-reference', 'That order does not belong to this seller QR.');
+    }
+    await retryMpesaPayment(repo, getPaymentGateway(), {
+      tenantId,
+      orderId,
+      actorId: context.sellerId,
+      callbackBaseUrl: getCallbackBaseUrl(),
+    });
+    await repo.touchSellerCredentialUsed(tenantId, context.credentialId);
+    revalidatePath(`/sell/${reference}`);
+    redirect(
+      `/sell/${reference}?k=${encodeURIComponent(bearer)}&orderId=${orderId}&success=payment-requested`,
     );
   } catch (error) {
     redirect(`/sell/${reference}?error=${sellerErrorCode(error)}`);

@@ -13,8 +13,8 @@ export type GatewayInitiateInput = {
   currency: string;
   /** E.164 customer phone for the STK prompt. */
   customerPhone: string;
-  /** HAPOS merchant identifier as known to PaymentOS. */
-  merchantId: string;
+  /** HAPOS merchant identifier as known to PaymentOS (adapter defaults it). */
+  merchantId?: string;
   /** HAPOS payment idempotency key (one per attempt). */
   idempotencyKey: string;
   /** Absolute callback URL PaymentOS will POST results to. */

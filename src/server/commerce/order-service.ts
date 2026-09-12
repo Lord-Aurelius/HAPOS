@@ -8,7 +8,7 @@
  * directly and are documented as remaining transitional.
  */
 
-import type { Order, Sale } from '@/lib/types';
+import type { Order, Payment, Sale } from '@/lib/types';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
 import { CartFormError } from '@/server/commerce/cart-form';
 import { CommerceError, type CartLineRequest, type OrderSource } from '@/server/commerce/orders';
@@ -341,4 +341,16 @@ export async function getTenantPolicy(tenantId: string): Promise<{ orderReviewRe
   const repo = getCommerceRepository();
   const policy = await repo.getTenantPolicy(tenantId);
   return { orderReviewRequired: policy.orderReviewRequired };
+}
+
+export async function getOrderPayments(session: CommerceSession, orderId: string): Promise<Payment[]> {
+  const repo = getCommerceRepository();
+  const order = await repo.getOrderView(session.tenantId, orderId);
+  if (!order) {
+    return [];
+  }
+  if (session.userRole === 'staff' && order.sellerId !== session.userId) {
+    return [];
+  }
+  return repo.listPayments(session.tenantId, { orderId });
 }

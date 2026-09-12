@@ -129,7 +129,7 @@ export class PaymentOSAdapter implements PaymentGateway {
     const body = await this.request('/v1/stk/initiate', {
       method: 'POST',
       body: JSON.stringify({
-        merchant_id: this.config.merchantId,
+        merchant_id: input.merchantId ?? this.config.merchantId,
         amount: input.amount,
         currency: input.currency,
         customer_phone: input.customerPhone,
