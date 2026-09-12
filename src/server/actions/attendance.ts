@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { requireSession } from '@/server/auth/demo-session';
-import { createRateLimiter } from '@/server/auth/rate-limit';
+import { checkAttendanceRateLimit } from '@/server/auth/attendance-limit';
 import { AttendanceError, assertValidEmployeeNumber, normalizeEmployeeNumber } from '@/server/commerce/attendance';
 import {
   checkInEmployee,
@@ -26,13 +26,10 @@ function attendanceStoreOf(store: StoreState): AttendanceStore {
   return store as unknown as AttendanceStore;
 }
 
-// Public terminal throttle: 30 attempts per 10 minutes per terminal. This is
-// enumeration friction for employee numbers, not authentication.
-const terminalLimiter = createRateLimiter({ maxAttempts: 30, windowMs: 10 * 60 * 1000 });
-
+// Public terminal throttle: shared budget with the API routes (see
+// server/auth/attendance-limit.ts) — enumeration friction, not auth.
 function checkTerminalRateLimit(reference: string) {
-  const decision = terminalLimiter.attempt(`attendance::${reference.toLowerCase()}`);
-  if (!decision.allowed) {
+  if (!checkAttendanceRateLimit(reference)) {
     redirect(`/attendance/${reference}?error=rate-limited`);
   }
 }
