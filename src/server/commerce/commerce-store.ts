@@ -116,6 +116,8 @@ export type OpsOrder = {
   rejectedAt?: string | null;
   rejectionReason?: string | null;
   createdBy?: string | null;
+  /** Phase 3 audit link: credential that created the order (null otherwise). */
+  sellerCredentialId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -143,6 +145,8 @@ export type OpsSale = {
   voidedAt?: string | null;
   voidedBy?: string | null;
   voidReason?: string | null;
+  /** Phase 3 audit link, copied from the order at finalization. */
+  sellerCredentialId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -170,6 +174,7 @@ export type CommerceStore = {
   users: OpsUser[];
   serviceProductLinks?: OpsBomLink[];
   inventoryMovements?: OpsMovement[];
+  sellerCredentials?: { id: string; tenantId: string; sellerId: string; status: string }[];
   orders: OpsOrder[];
   orderItems: OpsOrderItem[];
   sales: OpsSale[];
@@ -228,6 +233,8 @@ export type CreateOrderInput = {
   creatorRole: ActorRole;
   creatorId: string;
   orderReviewRequired: boolean;
+  /** Phase 3: QR credential attribution. Validated below when present. */
+  sellerCredentialId?: string | null;
 };
 
 export function createOrder(
@@ -257,6 +264,21 @@ export function createOrder(
     const seller = store.users.find((item) => item.id === input.sellerId) ?? null;
     if (!seller || (seller.tenantId !== null && seller.tenantId !== input.tenantId)) {
       throw new CommerceError('unknown-item', 'Seller not found for this shop.');
+    }
+  }
+
+  // Phase 3 defense-in-depth: a credential link must reference an ACTIVE
+  // credential for the same tenant and seller. QR actions verify the bearer
+  // first; this keeps direct callers honest too.
+  if (input.sellerCredentialId) {
+    const credential = (store.sellerCredentials ?? []).find((item) => item.id === input.sellerCredentialId) ?? null;
+    if (
+      !credential ||
+      credential.tenantId !== input.tenantId ||
+      credential.sellerId !== (input.sellerId ?? '') ||
+      credential.status !== 'ACTIVE'
+    ) {
+      throw new CommerceError('unknown-item', 'Seller credential not found for this shop.');
     }
   }
 
@@ -312,6 +334,7 @@ export function createOrder(
     idempotencyKey: key,
     quotedAt: now,
     createdBy: input.creatorId,
+    sellerCredentialId: input.sellerCredentialId ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -525,6 +548,7 @@ export function finalizeApprovedOrder(
     approvedBy: input.actorId,
     completedAt: now,
     recordedBy: input.actorId,
+    sellerCredentialId: order.sellerCredentialId ?? null,
     createdAt: now,
     updatedAt: now,
   };

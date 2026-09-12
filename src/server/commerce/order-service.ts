@@ -214,6 +214,8 @@ export type CreateCommerceOrderInput = {
   notes?: string | null;
   source?: OrderSource;
   idempotencyKey?: string | null;
+  /** Phase 3: QR credential attribution (validated by the ops layer). */
+  sellerCredentialId?: string | null;
 };
 
 export async function createAndSubmitOrder(
@@ -243,6 +245,7 @@ export async function createAndSubmitOrder(
         creatorRole: actorRoleOf(session),
         creatorId: session.userId,
         orderReviewRequired: policy,
+        sellerCredentialId: input.sellerCredentialId ?? null,
       },
     );
 

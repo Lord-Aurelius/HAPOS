@@ -67,3 +67,14 @@ export function buildAttendanceTerminalUrl(reference: string, token: string, env
   const baseUrl = getPublicAppBaseUrl(env);
   return baseUrl ? `${baseUrl}${path}` : path;
 }
+
+/**
+ * Seller QR URL (Phase 3). Same bearer discipline as attendance, separate
+ * namespace and credential: resolves a transaction-only context scoped to
+ * CREATE_ORDER + SUBMIT_ORDER for the credential's seller.
+ */
+export function buildSellerQrUrl(publicReference: string, bearer: string, env?: NodeJS.ProcessEnv): string {
+  const path = `/sell/${publicReference}?k=${encodeURIComponent(bearer)}`;
+  const baseUrl = getPublicAppBaseUrl(env);
+  return baseUrl ? `${baseUrl}${path}` : path;
+}

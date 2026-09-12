@@ -1,11 +1,22 @@
 import { addUserAction, setUserPasswordAction, setUserStatusAction, updateStaffTermsAction } from '@/server/actions/hapos';
 import { setEmployeeNumberAction } from '@/server/actions/attendance';
+import {
+  issueSellerCredentialAction,
+  revokeSellerCredentialAction,
+  rotateSellerCredentialAction,
+} from '@/server/actions/seller';
 import { requireSession } from '@/server/auth/demo-session';
 import { listUsers } from '@/server/services/app-data';
 import { listCredentialRecordsForTenant } from '@/server/services/admin-tools';
+import { listSellerCredentialsByTenant } from '@/server/store';
 
 type StaffSettingsPageProps = {
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    error?: string;
+    showSellerRef?: string;
+    showSellerBearer?: string;
+  }>;
 };
 
 export default async function StaffSettingsPage({ searchParams }: StaffSettingsPageProps) {
@@ -15,10 +26,16 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
   }
   const params = await searchParams;
 
-  const [users, credentials] = await Promise.all([
+  const [users, credentials, sellerCredentials] = await Promise.all([
     listUsers(session.tenant.id),
     listCredentialRecordsForTenant(session.tenant.id),
+    listSellerCredentialsByTenant(session.tenant.id),
   ]);
+  const credentialBySeller = new Map(sellerCredentials.map((credential) => [credential.sellerId, credential]));
+  const oneTimeSellerQr =
+    params.showSellerRef && params.showSellerBearer
+      ? `/api/v1/admin/tenants/${session.tenant.id}/seller-qr?reference=${encodeURIComponent(params.showSellerRef)}&bearer=${encodeURIComponent(params.showSellerBearer)}`
+      : null;
 
   return (
     <>
@@ -49,6 +66,12 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                 ? 'That employee was not found for this shop.'
               : params.success === 'employee-number-saved'
                 ? 'Employee number saved for attendance.'
+              : params.success === 'seller-qr-issued'
+                ? 'Seller QR credential issued. Print the QR now — the bearer is shown once.'
+              : params.success === 'seller-qr-rotated'
+                ? 'Seller QR rotated. The previous code stopped working immediately.'
+              : params.success === 'seller-qr-revoked'
+                ? 'Seller QR credential revoked.'
                   : 'Staff settings saved.'}
           </span>
         </section>
@@ -202,6 +225,76 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
               </button>
             </div>
           </form>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Seller QR credentials</h2>
+            <p className="panel-copy">
+              One transaction-only QR per seller. Bearers are shown once and never stored. Rotation
+              and revocation take effect immediately; past transactions stay valid.
+            </p>
+          </div>
+        </div>
+
+        {oneTimeSellerQr ? (
+          <div className="stack" style={{ marginBottom: 16 }}>
+            <p className="panel-copy">Fresh seller QR — print it now. It cannot be recovered afterwards.</p>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`${oneTimeSellerQr}&format=svg`} alt="Seller QR code" style={{ maxWidth: 280 }} />
+            <div className="hero-actions" style={{ marginTop: 0 }}>
+              <a className="button secondary" href={`${oneTimeSellerQr}&format=png&download=1`}>
+                Download PNG
+              </a>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="stack">
+          {users
+            .filter((user) => user.role === 'staff' || user.role === 'shop_admin')
+            .map((user) => {
+              const credential = credentialBySeller.get(user.id);
+              return (
+                <div key={user.id} className="list-row">
+                  <div>
+                    <strong>{user.fullName}</strong>
+                    <div className="eyebrow">
+                      {credential
+                        ? `${credential.status} · issued ${credential.issuedAt.slice(0, 10)} · last used ${credential.lastUsedAt ? credential.lastUsedAt.slice(0, 16).replace('T', ' ') : 'never'}${credential.revokedAt ? ` · revoked ${credential.revokedAt.slice(0, 10)}` : ''}`
+                        : 'No QR credential'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {!credential || credential.status !== 'ACTIVE' ? (
+                      <form action={issueSellerCredentialAction}>
+                        <input type="hidden" name="sellerId" value={user.id} />
+                        <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
+                          Issue QR
+                        </button>
+                      </form>
+                    ) : (
+                      <form action={rotateSellerCredentialAction}>
+                        <input type="hidden" name="sellerId" value={user.id} />
+                        <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
+                          Rotate
+                        </button>
+                      </form>
+                    )}
+                    {credential && credential.status === 'ACTIVE' ? (
+                      <form action={revokeSellerCredentialAction}>
+                        <input type="hidden" name="sellerId" value={user.id} />
+                        <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
+                          Revoke
+                        </button>
+                      </form>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
         </div>
       </section>
 
