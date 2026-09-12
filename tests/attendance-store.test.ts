@@ -154,4 +154,60 @@ describe('rotateTerminal / verifyTerminalToken', () => {
     assertAttendanceCode(() => verifyTerminalToken(store, first.terminal.reference, first.token), 'invalid-terminal');
     assert.doesNotThrow(() => verifyTerminalToken(store, second.terminal.reference, second.token));
   });
+
+  it('rejects missing, wrong and cross-context tokens', () => {
+    const store = testStore();
+    const rotated = rotateTerminal(store, { tenantId: 'tenant-a', shopSlug: 'shop-a' }, { generateId, tokenHex: TOKEN_HEX });
+    assertAttendanceCode(() => verifyTerminalToken(store, rotated.terminal.reference, ''), 'invalid-terminal');
+    assertAttendanceCode(() => verifyTerminalToken(store, rotated.terminal.reference, '0'.repeat(64)), 'invalid-terminal');
+    assertAttendanceCode(() => verifyTerminalToken(store, 'att-unknown-000000', rotated.token), 'invalid-terminal');
+  });
+});
+
+describe('security boundaries', () => {
+  it('identify exposes only confirmation data (no secrets, no hash)', () => {
+    const identified = identifyEmployee(testStore(), 'tenant-a', 'EMP-0042');
+    assert.deepEqual(Object.keys(identified).sort(), [
+      'employeeNumber',
+      'fullName',
+      'id',
+      'isActive',
+      'openCheckInAt',
+      'openRecordId',
+    ]);
+  });
+
+  it('employees without a number can never be resolved', () => {
+    const store = testStore();
+    store.users = [{ id: 'emp-nonumber', tenantId: 'tenant-a', fullName: 'No Number', isActive: true }];
+    assertAttendanceCode(() => identifyEmployee(store, 'tenant-a', 'EMP-0042'), 'unknown-employee');
+    assertAttendanceCode(() => identifyEmployee(store, 'tenant-a', 'EMP-0099'), 'unknown-employee');
+  });
+
+  it('unknown terminal references fail closed on actions', () => {
+    const store = testStore();
+    assertAttendanceCode(
+      () => checkInEmployee(store, { tenantId: 'tenant-a', employeeNumber: 'EMP-0042', terminalReference: 'att-nope-000000', timeZone: 'Africa/Nairobi' }, { generateId }),
+      'invalid-terminal',
+    );
+    assert.equal(store.attendanceRecords.length, 0);
+  });
+
+  it('concurrent checkouts converge on one close', () => {
+    const store = testStore();
+    const input = { tenantId: 'tenant-a', employeeNumber: 'EMP-0042', timeZone: 'Africa/Nairobi' };
+    checkInEmployee(store, input, { generateId, now: '2026-05-01T05:00:00.000Z' });
+    const outcomes = [0, 1].map(() => {
+      try {
+        checkOutEmployee(store, input, { generateId, now: '2026-05-01T14:00:00.000Z' });
+        return true;
+      } catch (error) {
+        assert.ok(error instanceof AttendanceError && error.code === 'not-checked-in');
+        return false;
+      }
+    });
+    assert.deepEqual(outcomes.filter(Boolean).length, 1);
+    assert.equal(store.attendanceRecords.length, 1);
+    assert.equal(store.attendanceRecords[0].status, 'CHECKED_OUT');
+  });
 });
