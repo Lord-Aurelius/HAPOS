@@ -146,6 +146,27 @@ const parityChecks = [
     tsType: 'SellerCredentialStatus',
     label: 'seller credential statuses',
   },
+  {
+    sqlFile: 'phase-04-payments.sql',
+    anchor: 'payment_status_check',
+    tsFile: 'payments.ts',
+    tsType: 'PaymentStatus',
+    label: 'payment statuses',
+  },
+  {
+    sqlFile: 'phase-04-payments.sql',
+    anchor: 'payment_provider_check',
+    tsFile: 'payments.ts',
+    tsType: 'PaymentProvider',
+    label: 'payment providers',
+  },
+  {
+    sqlFile: 'phase-04-payments.sql',
+    anchor: 'payment_method_check',
+    tsFile: 'payments.ts',
+    tsType: 'PaymentMethod',
+    label: 'payment methods',
+  },
 ];
 
 for (const check of parityChecks) {
