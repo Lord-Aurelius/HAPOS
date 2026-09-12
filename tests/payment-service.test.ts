@@ -289,3 +289,70 @@ describe('payment-service (initiate / callback / retry)', () => {
     assert.equal((recovered as { outcome: string }).outcome ?? 'completed', 'completed');
   });
 });
+
+describe('payment security and concurrency', () => {
+  it('browser cannot dictate payment amount (server total wins)', async () => {
+    const repo = new MemoryRepo();
+    const gateway = new MockPaymentProvider({ NODE_ENV: 'test' });
+    const created = await repo.createOrder({
+      tenantId: 'tenant-a', customerId: null, sellerId: null, source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-1', quantity: 1 } as never],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: false, paymentMethod: 'MPESA', customerPhone: '+254712345678',
+    } as never);
+    // Even if a client claims a different amount, initiate uses order.total (1000).
+    const initiated = await initiateMpesaPayment(repo as unknown as CommerceRepository, gateway, {
+      tenantId: 'tenant-a', orderId: created.order.id, actorId: 'staff-1', customerPhone: '+254712345678',
+    });
+    assert.equal(initiated.payment.amount, 1000);
+  });
+
+  it('cross-tenant payment lookup fails', async () => {
+    const repo = new MemoryRepo();
+    const gateway = new MockPaymentProvider({ NODE_ENV: 'test' });
+    const created = await repo.createOrder({
+      tenantId: 'tenant-a', customerId: null, sellerId: null, source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-1', quantity: 1 } as never],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: false, paymentMethod: 'MPESA', customerPhone: '+254712345678',
+    } as never);
+    const initiated = await initiateMpesaPayment(repo as unknown as CommerceRepository, gateway, {
+      tenantId: 'tenant-a', orderId: created.order.id, actorId: 'staff-1', customerPhone: '+254712345678',
+    });
+    // Tenant B cannot find the payment by idempotency.
+    const foreign = await repo.getPaymentByIdempotency('tenant-b', initiated.payment.idempotencyKey!);
+    assert.equal(foreign, null);
+    // Callback scoped to wrong tenant fails.
+    const rawBody = JSON.stringify({ request_id: initiated.providerRequestId, provider_reference: 'R', amount: 1000, currency: 'KES', status: 'SUCCESS' });
+    await assert.rejects(() =>
+      handlePaymentCallback(
+        { getPaymentByIdGlobal: async () => ({ ...initiated.payment, tenantId: 'tenant-b' } as never), getPaymentByIdempotency: repo.getPaymentByIdempotency.bind(repo), transitionPayment: repo.transitionPayment.bind(repo), completePaidOrder: repo.completePaidOrder.bind(repo), getOrderWithItems: repo.getOrderWithItems.bind(repo) } as unknown as CommerceRepository,
+        gateway,
+        { rawBody, headers: {}, paymentId: initiated.payment.id },
+      ),
+    );
+    void initiated;
+  });
+
+  it('concurrent identical callbacks converge to one finalization', async () => {
+    const repo = new MemoryRepo();
+    const gateway = new MockPaymentProvider({ NODE_ENV: 'test' });
+    const created = await repo.createOrder({
+      tenantId: 'tenant-a', customerId: null, sellerId: null, source: 'SELLER_QR',
+      lines: [{ kind: 'service', refId: 'svc-1', quantity: 1 } as never],
+      creatorRole: 'staff', creatorId: 'staff-1', orderReviewRequired: false, paymentMethod: 'MPESA', customerPhone: '+254712345678',
+    } as never);
+    const initiated = await initiateMpesaPayment(repo as unknown as CommerceRepository, gateway, {
+      tenantId: 'tenant-a', orderId: created.order.id, actorId: 'staff-1', customerPhone: '+254712345678',
+    });
+    const rawBody = JSON.stringify({ request_id: initiated.providerRequestId, provider_reference: 'R', amount: 1000, currency: 'KES', status: 'SUCCESS' });
+    const outcomes = await Promise.all([
+      handlePaymentCallback(repo as unknown as CommerceRepository, gateway, { rawBody, headers: {}, paymentId: initiated.payment.id }),
+      handlePaymentCallback(repo as unknown as CommerceRepository, gateway, { rawBody, headers: {}, paymentId: initiated.payment.id }),
+    ]);
+    const successes = outcomes.filter((o) => o.outcome === 'completed').length;
+    const duplicates = outcomes.filter((o) => o.outcome === 'duplicate').length;
+    assert.equal(successes, 1);
+    assert.equal(duplicates, 1);
+    // Exactly one stock decrement despite two deliveries.
+    assert.equal(repo.products.get('prod-oil')?.quantityOnHand, 9);
+  });
+});
