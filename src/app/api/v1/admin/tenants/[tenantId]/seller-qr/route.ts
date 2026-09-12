@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import { NextResponse } from 'next/server';
 
 import { requireSession } from '@/server/auth/demo-session';
+import { QrAccessError, checkQrTenantAccess } from '@/server/auth/qr-access';
 import { getTenantById } from '@/server/store';
 import { buildSellerQrUrl } from '@/server/config/public-url';
 
@@ -30,8 +31,13 @@ export async function GET(request: Request, context: RouteContext) {
     return NextResponse.json({ error: 'Tenant not found.' }, { status: 404 });
   }
 
-  if (session.user.role !== 'super_admin' && session.tenant?.id !== tenant.id) {
-    return NextResponse.json({ error: 'Only admins for this shop can render seller QR codes.' }, { status: 403 });
+  try {
+    checkQrTenantAccess(session, tenant.id);
+  } catch (error) {
+    if (error instanceof QrAccessError) {
+      return NextResponse.json({ error: 'Only admins for this shop can render seller QR codes.' }, { status: 403 });
+    }
+    throw error;
   }
 
   const { searchParams } = new URL(request.url);
