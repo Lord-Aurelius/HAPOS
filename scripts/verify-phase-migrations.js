@@ -132,6 +132,13 @@ const parityChecks = [
     tsType: 'SaleStatus',
     label: 'sale statuses',
   },
+  {
+    sqlFile: 'phase-2a-attendance.sql',
+    anchor: 'attendance_status_check',
+    tsFile: 'attendance.ts',
+    tsType: 'AttendanceStatus',
+    label: 'attendance statuses',
+  },
 ];
 
 for (const check of parityChecks) {
