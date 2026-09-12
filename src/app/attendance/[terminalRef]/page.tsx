@@ -4,6 +4,7 @@ import {
   checkOutAttendanceAction,
   identifyAttendanceAction,
 } from '@/server/actions/attendance';
+import { checkAttendanceRateLimit } from '@/server/auth/attendance-limit';
 import { identifyEmployee, verifyTerminalToken, type AttendanceStore } from '@/server/commerce/attendance-store';
 import { readStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
@@ -34,6 +35,12 @@ export default async function AttendanceTerminalPage({ params, searchParams }: T
   const number = query.number ?? '';
   const baseErrorMessage = getErrorMessage(query.error);
   let identifyErrorMessage: string | null = null;
+  // The ?number= render path performs the same lookup as the identify action,
+  // so it shares the terminal throttle (direct-URL enumeration is throttled).
+  const numberLookupAllowed = number ? checkAttendanceRateLimit(terminalRef) : true;
+  if (number && !numberLookupAllowed) {
+    identifyErrorMessage = getErrorMessage('rate-limited');
+  }
 
   let tenantName: string | null = null;
   let terminalValid = false;
@@ -54,7 +61,7 @@ export default async function AttendanceTerminalPage({ params, searchParams }: T
       tenantName = fullStore.tenants.find((item) => item.id === context.tenantId)?.name ?? null;
       terminalValid = true;
 
-      if (number) {
+      if (number && numberLookupAllowed) {
         try {
           identified = identifyEmployee(store, context.tenantId, number);
         } catch (error) {
