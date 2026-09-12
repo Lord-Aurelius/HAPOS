@@ -831,6 +831,13 @@ svg { display: block; }
   font-size: 0.85rem;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
+.field input[type="radio"], .field input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  accent-color: var(--accent);
+}
 .field input:focus, .field textarea:focus, .field select:focus {
   outline: none;
   border-color: var(--accent);
