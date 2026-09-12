@@ -34,6 +34,7 @@ export type SellerErrorCode =
   | 'invalid-bearer'
   | 'credential-revoked'
   | 'credential-expired'
+  | 'credential-active'
   | 'unknown-seller'
   | 'inactive-seller'
   | 'cross-tenant'
