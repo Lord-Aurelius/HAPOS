@@ -229,15 +229,71 @@ arithmetic. The status-poll response (`toPaymentResponse`) exposes
 must assert against `amount_base` (or accept `amount_total` minus the
 known `platform_fee`), never against `amount_total` directly.
 
-## 12. Residual gaps / NOT YET AVAILABLE
+## 12. Credential rotation — VERIFIED design (closure)
+
+PaymentOS displays a tenant API key **once** and supports regeneration from
+its admin console; there is **no dual-key overlap window** in the verified
+contract. HAPOS therefore implements an **atomic application-side cutover**:
+
+```
+new credentials submitted (shop admin, Settings > Payments)
+  → probe: authenticated GET /api/payment-accounts with the NEW key
+  → only on success: sealed secret + webhook secret replaced in the SAME
+    connection row (connection id preserved → history intact)
+  → audit CREDENTIAL_ROTATED (or ROTATION_FAILED with result=ERROR)
+  → old key retired implicitly (PaymentOS invalidates the regenerated key)
+```
+
+Rules:
+- Rotation must target the SAME PaymentOS merchant; changing merchants is
+  disconnect + connect (new connection identity).
+- A failed probe never cuts over: the old credential stays active.
+- Submitting the already-active credential is a no-op (`unchanged`).
+- Historical payments keep their stored `payment_connection_id` + provider
+  references — rotation touches credentials only, never payment history.
+- Disconnected connections keep their sealed secrets so historical payments
+  remain status-verifiable; reconnection reactivates in place.
+
+## 13. Connection audit trail — VERIFIED design (closure)
+
+Every lifecycle action appends a `payment_connection_events` row
+(`db/migrations/phase-4b2-connection-events.sql`):
+
+```
+tenant_id, connection_id, action, actor_id, actor_role,
+result (OK|ERROR), old/new provider reference, created_at
+```
+
+Actions: `CONNECTED, RECONNECTED, VERIFIED, DISCONNECTED,
+CREDENTIAL_ROTATED, ROTATION_FAILED, ENVIRONMENT_REJECTED,
+FOREIGN_MERCHANT_REJECTED`. Recording is best-effort (never blocks the
+operation) and **never stores secret material** — the event schema has no
+field that could carry it. The platform view (`/super/payments`) renders
+these events read-only with the merchant reference masked to its last 4
+characters; sealed and plaintext credentials are never requested, returned,
+or rendered there.
+
+## 14. Missed-webhook convergence — VERIFIED design (closure)
+
+PaymentOS webhook delivery is fire-and-forget; HAPOS converges via
+`reconcileStalePendingPayments` (admin action on Orders): for PENDING
+intents older than 2 minutes it polls `GET /api/payments/:id/status`
+**through the payment's own connection-bound gateway** (using that row's
+sealed secret — disconnected connections still verify history). Outcome
+rules mirror the callback path: provider `PAID` + amount assertion against
+`amount` (= `amount_base`) → `SUCCESS` + sale finalization;
+`FAILED/CANCELLED/EXPIRED` → provider evidence recorded; provider still
+open → left PENDING; provider errors → skipped, never guessed.
+
+## 15. Residual gaps / NOT YET AVAILABLE
 
 - PaymentOS supports only `KES` and integer base units (`SUPPORTED_CURRENCIES`)
   — HAPOS already defaults to KES; non-KES tenants cannot use M-Pesa.
 - No reverse/refund API in PaymentOS; refunds remain out of scope (Phase 4
   doc already notes this).
-- Webhook delivery from PaymentOS is fire-and-forget (retries require their
-  reconciliation cron); HAPOS also polls `GET /api/payments/:id/status` on
-  callback misses? — NOT YET AVAILABLE in HAPOS (future hardening).
+- Webhook delivery from PaymentOS is fire-and-forget; HAPOS converges via
+  status polling (§14). A scheduled (cron) sweep in addition to the manual
+  admin action is future hardening.
 - The exact staging PaymentOS deployment URL + real credentials are
   environment configuration, not code; staging verification (§25 of the
   phase brief) must be run with the platform team.
