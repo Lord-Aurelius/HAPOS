@@ -25,6 +25,7 @@ import { getCommerceRepository } from '@/server/commerce/repository-select';
 import { getCallbackBaseUrl, getPaymentGateway, initiateMpesaPayment, recordCashPayment, retryMpesaPayment } from '@/server/payments/payment-service';
 import { PaymentError } from '@/server/commerce/payments';
 import { GatewayError } from '@/server/payments/gateway';
+import { PaymentConnectionError } from '@/server/payments/connection';
 import { readStore, updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
 
@@ -51,6 +52,10 @@ function sellerErrorCode(error: unknown): string {
     return 'invalid-idempotency-key';
   }
   if (error instanceof GatewayError) {
+    return error.code;
+  }
+  if (error instanceof PaymentConnectionError) {
+    // Rendered through the same friendly-message map as gateway errors.
     return error.code;
   }
   throw error;

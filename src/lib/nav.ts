@@ -26,6 +26,7 @@ export const shopNav: NavItem[] = [
   { href: '/app/sms', label: 'SMS Center', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/subscription', label: 'Subscription', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/settings/staff', label: 'Staff', roles: ['shop_admin', 'super_admin'] },
+  { href: '/app/settings/payments', label: 'Payments', roles: ['shop_admin', 'super_admin'] },
   { href: '/app/settings/loyalty', label: 'Loyalty', roles: ['shop_admin', 'super_admin'] },
 ];
 
@@ -44,7 +45,7 @@ export const shopNavSections: Array<{ label: string; paths: string[] }> = [
   { label: 'Operations', paths: ['/app/service-entry', '/app/orders', '/app/seller', '/app/sales', '/app/customers', '/app/services', '/app/products'] },
   { label: 'Commerce', paths: ['/app/marketplace', '/app/commissions', '/app/expenses'] },
   { label: 'Reports', paths: ['/app/reports/monthly', '/app/history', '/app/sms'] },
-  { label: 'Admin', paths: ['/app/attendance', '/app/subscription', '/app/settings/staff', '/app/settings/loyalty'] },
+  { label: 'Admin', paths: ['/app/attendance', '/app/subscription', '/app/settings/staff', '/app/settings/payments', '/app/settings/loyalty'] },
 ];
 
 export const customerNav = [

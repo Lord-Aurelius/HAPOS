@@ -4,6 +4,7 @@ import { checkSellerRateLimit } from '@/server/auth/seller-limit';
 import { getSellerQrContext, retrySellerQrPaymentAction, submitSellerQrOrderAction } from '@/server/actions/seller';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { getCommerceRepository } from '@/server/commerce/repository-select';
+import { getMpesaAvailability } from '@/server/payments/payment-service';
 
 type SellPageProps = {
   params: Promise<{ reference: string }>;
@@ -27,6 +28,9 @@ function getErrorMessage(error?: string) {
     'insufficient-stock': 'Insufficient stock — the sale was blocked and nothing was deducted.',
     'rate-limited': 'Too many attempts. Wait a few minutes and try again.',
     'invalid-phone': 'Enter a valid Kenyan M-Pesa number (e.g. 0712345678).',
+    'connection-not-connected': 'M-Pesa is not connected for this shop. Ask the shop admin to connect payments.',
+    'connection-environment-mismatch': 'The shop payment connection belongs to a different environment.',
+    'connection-secret-unavailable': 'Payment connection credentials are unavailable. Reconnect payments in settings.',
     'gateway-unconfigured': 'Payment provider is not configured. Cash works; M-Pesa needs staging setup.',
     'gateway-rejected': 'Payment provider rejected the request. Try again.',
     'gateway-timeout': 'Payment provider did not respond. Try again.',
@@ -86,6 +90,10 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
       };
     }
   }
+
+  // M-Pesa readiness is a server-side fact: the radio is disabled unless the
+  // tenant's payment connection is CONNECTED (never a predictable provider error).
+  const mpesa = context ? await getMpesaAvailability(getCommerceRepository(), context.tenantId) : { available: false, reason: 'payment-not-connected', connectionId: null };
 
   const feedback = getErrorMessage(query.error) ?? (query.success === 'order-duplicate' ? 'That submission was already recorded.' : null);
 
@@ -214,8 +222,15 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
                   immediately
                 </label>
                 <label>
-                  <input type="radio" name="paymentMethod" value="mpesa" /> M-Pesa — order is held for
-                  payment (Phase 4 integration not yet enabled; no payment is collected)
+                  <input
+                    type="radio"
+                    name="paymentMethod"
+                    value="mpesa"
+                    disabled={!mpesa.available}
+                  />{' '}
+                  {mpesa.available
+                    ? 'M-Pesa — sends an STK push to the customer'
+                    : 'M-Pesa unavailable for this shop.'}
                 </label>
               </div>
             </div>
