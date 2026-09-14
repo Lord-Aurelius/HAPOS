@@ -1,6 +1,7 @@
 import {
   connectPaymentOSAction,
   disconnectConnectionAction,
+  rotateCredentialsAction,
   verifyConnectionAction,
 } from '@/server/actions/payment-connections';
 import { requireSession } from '@/server/auth/demo-session';
@@ -15,6 +16,7 @@ type PaymentsSettingsPageProps = {
 const SUCCESS_MESSAGES: Record<string, string> = {
   connected: 'PaymentOS connected. M-Pesa is live for this shop.',
   'connection-verified': 'Connection verified with PaymentOS.',
+  'credentials-rotated': 'New credentials verified and activated. The previous key no longer works.',
   disconnected: 'Payment connection disconnected. New M-Pesa payments are blocked; past payments are unchanged.',
 };
 
@@ -136,6 +138,26 @@ export default async function PaymentsSettingsPage({ searchParams }: PaymentsSet
                 </>
               ) : null}
             </div>
+            {connection?.status === 'CONNECTED' && connection.providerTenantId ? (
+              <details className="panel" style={{ background: 'transparent', border: 'none', padding: 0 }}>
+                <summary className="eyebrow" style={{ cursor: 'pointer' }}>Rotate credentials (replace the API key / webhook secret)</summary>
+                <form action={rotateCredentialsAction} className="field-grid" style={{ marginTop: 8 }}>
+                  <input type="hidden" name="providerTenantId" value={connection.providerTenantId} />
+                  <input type="hidden" name="environment" value={connection.environment} />
+                  <div className="field">
+                    <label htmlFor="rotate-api-key">New API key (shown once by the platform)</label>
+                    <input id="rotate-api-key" name="apiKey" type="password" required autoComplete="off" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="rotate-webhook-secret">New webhook signing secret</label>
+                    <input id="rotate-webhook-secret" name="webhookSecret" type="password" required autoComplete="off" />
+                  </div>
+                  <div className="hero-actions">
+                    <button type="submit" className="button secondary">Verify &amp; activate new credentials</button>
+                  </div>
+                </form>
+              </details>
+            ) : null}
           </div>
         </div>
 

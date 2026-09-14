@@ -5,7 +5,12 @@ import { redirect } from 'next/navigation';
 
 import { requireSession } from '@/server/auth/demo-session';
 import { getCommerceRepository } from '@/server/commerce/repository-select';
-import { connectPaymentOS, disconnectConnection, verifyConnection } from '@/server/payments/connection-service';
+import {
+  connectPaymentOS,
+  disconnectConnection,
+  rotateConnectionCredentials,
+  verifyConnection,
+} from '@/server/payments/connection-service';
 
 /**
  * Shop-admin payment connection management (Phase 4B).
@@ -69,6 +74,32 @@ export async function verifyConnectionAction() {
       error: success ? undefined : (result.code ?? 'connection-verification-failed'),
       message: success ? undefined : result.message.slice(0, 160),
     }),
+  );
+}
+
+export async function rotateCredentialsAction(formData: FormData) {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) {
+    redirect('/super/tenants');
+  }
+  const tenantId = session.tenant.id;
+  const raw = {
+    providerTenantId: formString(formData, 'providerTenantId'),
+    apiKey: formString(formData, 'apiKey'),
+    webhookSecret: formString(formData, 'webhookSecret'),
+    environment: formString(formData, 'environment') || 'SANDBOX',
+    displayName: null,
+  };
+  const repo = getCommerceRepository();
+  const result = await rotateConnectionCredentials(repo, { tenantId, raw, actorId: session.user.id });
+  if (result.outcome === 'error') {
+    redirect(toQuery('/app/settings/payments', { error: result.code, message: result.message.slice(0, 160) }));
+  }
+  revalidatePath('/app/settings/payments');
+  redirect(
+    result.outcome === 'unchanged'
+      ? toQuery('/app/settings/payments', { message: result.message })
+      : '/app/settings/payments?success=credentials-rotated',
   );
 }
 
