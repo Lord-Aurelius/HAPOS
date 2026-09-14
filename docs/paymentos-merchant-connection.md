@@ -211,7 +211,25 @@ callback. Rehearse rotation: regenerate the tenant API key in PaymentOS,
 reconnect from the HAPOS admin, confirm old key stops authenticating
 (staging only).
 
-## 11. Residual gaps / NOT YET AVAILABLE
+## 11. Amount semantics (VERIFIED) — `amount` vs `amount_total`
+
+PaymentOS stores three numbers (`paymentService.dispatchEvent`,
+`payment_accounts.platform_fee`):
+
+- `amount_base` — what HAPOS asked to charge (the HAPOS order total),
+- `platform_fee` — the House Aurelius platform fee (default KSh 10, FIXED),
+- `amount_total` — `amount_base + platform_fee` — **this is what M-Pesa
+  actually prompts the customer for**.
+
+The webhook `amount` field carries `amount_base` (verified in
+`dispatchEvent`: `amount: payment.amountBase`), so HAPOS's callback
+assertion compares like-for-like against the order total with no fee
+arithmetic. The status-poll response (`toPaymentResponse`) exposes
+`amount_base`, `platform_fee` and `amount_total` separately — the poller
+must assert against `amount_base` (or accept `amount_total` minus the
+known `platform_fee`), never against `amount_total` directly.
+
+## 12. Residual gaps / NOT YET AVAILABLE
 
 - PaymentOS supports only `KES` and integer base units (`SUPPORTED_CURRENCIES`)
   — HAPOS already defaults to KES; non-KES tenants cannot use M-Pesa.

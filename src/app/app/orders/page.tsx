@@ -13,6 +13,7 @@ import {
 import {
   expireOverduePaymentsAction,
   recoverPaidOrderAction,
+  reconcilePendingPaymentsAction,
   retryOrderPaymentAction,
 } from '@/server/actions/payments';
 import {
@@ -26,10 +27,10 @@ import {
 import { listCustomers, listProducts, listServices } from '@/server/services/app-data';
 
 type OrdersPageProps = {
-  searchParams: Promise<{ orderId?: string; saleId?: string; success?: string; error?: string }>;
+  searchParams: Promise<{ orderId?: string; saleId?: string; success?: string; error?: string; completed?: string; failed?: string; pending?: string }>;
 };
 
-function getMessage(params: { success?: string; error?: string }) {
+function getMessage(params: { success?: string; error?: string; completed?: string; failed?: string; pending?: string }) {
   if (params.success === 'order-created') {
     return 'Order created and routed by merchant policy.';
   }
@@ -47,6 +48,12 @@ function getMessage(params: { success?: string; error?: string }) {
   }
   if (params.success === 'sale-voided') {
     return 'Sale voided. Stock effects were reversed with audited movements.';
+  }
+  if (params.success === 'reconciliation-run') {
+    const completed = Number(params.completed ?? 0);
+    const failed = Number(params.failed ?? 0);
+    const pending = Number(params.pending ?? 0);
+    return `Payment status check finished: ${completed} completed, ${failed} failed/expired, ${pending} still pending or skipped.`;
   }
   if (!params.error) {
     return null;
@@ -391,6 +398,11 @@ export default async function OrdersPage({ searchParams }: OrdersPageProps) {
               <form action={expireOverduePaymentsAction}>
                 <button type="submit" className="button secondary">
                   Expire overdue intents
+                </button>
+              </form>
+              <form action={reconcilePendingPaymentsAction}>
+                <button type="submit" className="button secondary">
+                  Check payment status with PaymentOS
                 </button>
               </form>
             </div>

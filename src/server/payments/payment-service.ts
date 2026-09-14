@@ -484,6 +484,175 @@ export async function expireOverduePayments(
   return expired;
 }
 
+export type ReconcileOutcome =
+  | { paymentId: string; outcome: 'completed'; saleId?: string }
+  | { paymentId: string; outcome: 'failed-held' }
+  | { paymentId: string; outcome: 'expired' }
+  | { paymentId: string; outcome: 'failed' }
+  | { paymentId: string; outcome: 'still-pending' }
+  | { paymentId: string; outcome: 'skipped'; reason: 'no-connection' | 'no-provider-request-id' | 'provider-error' };
+
+/**
+ * Reconcile stale PENDING M-Pesa intents by polling PaymentOS directly
+ * (`GET /api/payments/:id/status`), closing the gap left by a missed or
+ * delayed webhook. Only payments with a provider request id AND older than
+ * `staleSeconds` are polled; anything already terminal is left alone.
+ *
+ * Money rules preserved: SUCCESS still passes the same amount assertion as
+ * a callback (against `amount_base`, which excludes PaymentOS's platform
+ * fee), failures/expiries are recorded as provider evidence, and no
+ * payment ever flips to SUCCESS without it.
+ */
+export async function reconcileStalePendingPayments(
+  repo: CommerceRepository,
+  input: { tenantId: string; actorId: string; staleSeconds?: number },
+  ctx: { now?: string; env?: Record<string, string | undefined> } = {},
+): Promise<ReconcileOutcome[]> {
+  const env = ctx.env ?? process.env;
+  const staleMs = Math.max(30, input.staleSeconds ?? 120) * 1000;
+  const now = ctx.now ?? new Date().toISOString();
+  const nowMs = Date.parse(now);
+
+  const pending = await repo.listPayments(input.tenantId, { status: 'PENDING' });
+  const stale = pending.filter((payment) => {
+    const reference = payment.initiatedAt ?? payment.createdAt;
+    return nowMs - Date.parse(reference) >= staleMs;
+  });
+  if (stale.length === 0) {
+    return [];
+  }
+
+  // One gateway per connection: payments on a disconnected/replaced
+  // connection still verify through their own row (status is not re-gated
+  // here because verification uses the stored secret, not liveness).
+  const gateways = new Map<string, PaymentGateway>();
+  const outcomes: ReconcileOutcome[] = [];
+
+  for (const payment of stale) {
+    if (!payment.providerRequestId) {
+      outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'no-provider-request-id' });
+      continue;
+    }
+    let gateway: PaymentGateway | null = null;
+    const connectionId = payment.connection?.connectionId ?? null;
+    if (connectionId) {
+      const cached = gateways.get(connectionId);
+      if (cached) {
+        gateway = cached;
+      } else {
+        const connection = await repo.getConnectionById(input.tenantId, connectionId);
+        if (!connection) {
+          outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'no-connection' });
+          continue;
+        }
+        try {
+          gateway = buildConnectionGateway(connection, env);
+        } catch {
+          outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'no-connection' });
+          continue;
+        }
+        gateways.set(connectionId, gateway);
+      }
+    } else {
+      // Connection-less payments (mock/legacy rows) have no provider to poll.
+      outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'no-connection' });
+      continue;
+    }
+
+    let verified: Awaited<ReturnType<PaymentGateway['verifyPayment']>>;
+    try {
+      verified = await gateway.verifyPayment(payment.providerRequestId);
+    } catch {
+      outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'provider-error' });
+      continue;
+    }
+
+    if (verified.status === 'SUCCESS') {
+      const orderId = payment.orderId;
+      if (!orderId) {
+        outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'provider-error' });
+        continue;
+      }
+      const found = await repo.getOrderWithItems(input.tenantId, orderId);
+      if (!found) {
+        outcomes.push({ paymentId: payment.id, outcome: 'skipped', reason: 'provider-error' });
+        continue;
+      }
+      try {
+        // PaymentOS polls expose amount_base/amount_total; amount_base is the
+        // like-for-like comparison (see docs §11).
+        assertConfirmationAmount({
+          authoritativeTotal: Math.round(found.order.total),
+          reportedTotal: verified.amount,
+          currency: found.order.currencyCode,
+          reportedCurrency: verified.currency,
+        });
+      } catch {
+        await repo.transitionPayment({
+          tenantId: input.tenantId,
+          paymentId: payment.id,
+          to: 'FAILED',
+          providerReference: verified.providerReference,
+          failureCode: 'AMOUNT_MISMATCH',
+          failureReason: 'Provider status poll disagrees with the HAPOS order total. Held for review.',
+        });
+        outcomes.push({ paymentId: payment.id, outcome: 'failed-held' });
+        continue;
+      }
+      const transitioned = await repo.transitionPayment({
+        tenantId: input.tenantId,
+        paymentId: payment.id,
+        to: 'SUCCESS',
+        providerReference: verified.providerReference,
+      });
+      if (transitioned.duplicate) {
+        outcomes.push({ paymentId: payment.id, outcome: 'still-pending' });
+        continue;
+      }
+      const completed = await repo.completePaidOrder({
+        tenantId: input.tenantId,
+        orderId,
+        paymentId: payment.id,
+        actorId: input.actorId,
+      });
+      outcomes.push(
+        completed.outcome === 'needs-recovery'
+          ? { paymentId: payment.id, outcome: 'failed-held' }
+          : { paymentId: payment.id, outcome: 'completed', saleId: completed.sale.id },
+      );
+      continue;
+    }
+
+    if (verified.status === 'FAILED' || verified.status === 'CANCELLED') {
+      await repo.transitionPayment({
+        tenantId: input.tenantId,
+        paymentId: payment.id,
+        to: 'FAILED',
+        providerReference: verified.providerReference,
+        failureCode: verified.failureCode,
+        failureReason: verified.failureReason,
+      });
+      outcomes.push({ paymentId: payment.id, outcome: 'failed' });
+      continue;
+    }
+    if (verified.status === 'EXPIRED') {
+      await repo.transitionPayment({
+        tenantId: input.tenantId,
+        paymentId: payment.id,
+        to: 'EXPIRED',
+        providerReference: verified.providerReference,
+        failureCode: verified.failureCode,
+        failureReason: verified.failureReason,
+      });
+      outcomes.push({ paymentId: payment.id, outcome: 'expired' });
+      continue;
+    }
+    outcomes.push({ paymentId: payment.id, outcome: 'still-pending' });
+  }
+
+  return outcomes;
+}
+
 /** Cash completion record: uniform payment model for later reconciliation. */
 export async function recordCashPayment(
   repo: CommerceRepository,

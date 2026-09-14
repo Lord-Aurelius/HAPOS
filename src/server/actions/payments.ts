@@ -6,10 +6,12 @@ import { redirect } from 'next/navigation';
 import { requireSession } from '@/server/auth/demo-session';
 import { getCommerceRepository } from '@/server/commerce/repository-select';
 import { toServiceError } from '@/server/commerce/order-service';
+import { PaymentConnectionError } from '@/server/payments/connection';
 import {
   expireOverduePayments,
   getCallbackBaseUrl,
   getPaymentGateway,
+  reconcileStalePendingPayments,
   retryMpesaPayment,
 } from '@/server/payments/payment-service';
 
@@ -79,4 +81,30 @@ export async function expireOverduePaymentsAction() {
   const expired = await expireOverduePayments(repo, { tenantId: session.tenant.id });
   revalidatePath('/app/orders');
   redirect(`/app/orders?success=expiry-swept&count=${expired}`);
+}
+
+/**
+ * Admin: poll PaymentOS directly for stale PENDING intents (missed-webhook
+ * convergence). Returns per-payment outcomes as a compact summary code.
+ */
+export async function reconcilePendingPaymentsAction() {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) {
+    redirect('/super/tenants');
+  }
+  const repo = getCommerceRepository();
+  try {
+    const outcomes = await reconcileStalePendingPayments(repo, {
+      tenantId: session.tenant.id,
+      actorId: session.user.id,
+    });
+    const completed = outcomes.filter((o) => o.outcome === 'completed').length;
+    const failed = outcomes.filter((o) => o.outcome === 'failed' || o.outcome === 'expired' || o.outcome === 'failed-held').length;
+    const pending = outcomes.filter((o) => o.outcome === 'still-pending' || o.outcome === 'skipped').length;
+    revalidatePath('/app/orders');
+    redirect(`/app/orders?success=reconciliation-run&completed=${completed}&failed=${failed}&pending=${pending}`);
+  } catch (error) {
+    const code = error instanceof PaymentConnectionError ? error.code : 'reconciliation-failed';
+    redirect(`/app/orders?error=${code}`);
+  }
 }
