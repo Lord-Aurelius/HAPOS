@@ -15,6 +15,7 @@ class MemoryRepo {
   products: Map<string, { quantityOnHand: number }> = new Map();
   sales: Map<string, { id: string; orderId: string }> = new Map();
   orderCounter = 0;
+  connections: Map<string, import('../src/server/payments/connection.ts').OpsPaymentConnection> = new Map();
 
   constructor() {
     this.products.set('prod-oil', { quantityOnHand: 10 });
@@ -95,6 +96,7 @@ class MemoryRepo {
       failureCode: null,
       failureReason: null,
       needsRecovery: false,
+      connection: input.connection ?? null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as OpsPayment;
@@ -121,6 +123,59 @@ class MemoryRepo {
   async getPaymentByProviderRequest() { return null as never; }
   async getPaymentByProviderRequestGlobal(providerRequestId: string) {
     return [...this.payments.values()].find((p) => p.providerRequestId === providerRequestId) ?? null;
+  }
+  // ── payment connections (Phase 4B) ──
+  async getConnectionById(tenantId: string, connectionId: string) {
+    const row = this.connections.get(connectionId);
+    return row && row.tenantId === tenantId ? row : null;
+  }
+  async getActiveConnection(tenantId: string) {
+    return [...this.connections.values()].find((c) => c.tenantId === tenantId && c.status === 'CONNECTED') ?? null;
+  }
+  async listConnections(tenantId: string) {
+    return [...this.connections.values()].filter((c) => c.tenantId === tenantId);
+  }
+  async findConnectionByProviderTenantId(providerTenantId: string) {
+    return [...this.connections.values()].find((c) => c.providerTenantId === providerTenantId) ?? null;
+  }
+  async createConnection(input: { tenantId: string; providerTenantId: string; environment: string; status: string; supportedMethods: string[]; secretSealed: string | null; webhookSecretSealed: string | null; displayName?: string | null; connectedAt?: string | null; lastVerifiedAt?: string | null }) {
+    const row = {
+      id: `conn-${input.providerTenantId}`,
+      tenantId: input.tenantId,
+      provider: 'PAYMENTOS' as const,
+      providerTenantId: input.providerTenantId,
+      environment: input.environment as never,
+      status: input.status as never,
+      displayName: input.displayName ?? null,
+      supportedMethods: input.supportedMethods as never,
+      connectedAt: input.connectedAt ?? null,
+      lastVerifiedAt: input.lastVerifiedAt ?? null,
+      disconnectedAt: null,
+      lastCheckCode: null,
+      lastCheckMessage: null,
+      secretSealed: input.secretSealed,
+      webhookSecretSealed: input.webhookSecretSealed,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as import('../src/server/payments/connection.ts').OpsPaymentConnection;
+    this.connections.set(row.id, row);
+    return row;
+  }
+  async updateConnection(input: { tenantId: string; connectionId: string; status?: string; lastVerifiedAt?: string | null; lastCheckCode?: string | null; lastCheckMessage?: string | null; connectedAt?: string | null; disconnectedAt?: string | null; secretSealed?: string | null; webhookSecretSealed?: string | null; displayName?: string | null; supportedMethods?: string[] }) {
+    const row = this.connections.get(input.connectionId);
+    if (!row || row.tenantId !== input.tenantId) throw new Error('connection missing');
+    if (input.status !== undefined) row.status = input.status as never;
+    if (input.lastVerifiedAt !== undefined) row.lastVerifiedAt = input.lastVerifiedAt;
+    if (input.lastCheckCode !== undefined) row.lastCheckCode = input.lastCheckCode;
+    if (input.lastCheckMessage !== undefined) row.lastCheckMessage = input.lastCheckMessage;
+    if (input.connectedAt !== undefined) row.connectedAt = input.connectedAt;
+    if (input.disconnectedAt !== undefined) row.disconnectedAt = input.disconnectedAt;
+    if (input.secretSealed !== undefined) row.secretSealed = input.secretSealed;
+    if (input.webhookSecretSealed !== undefined) row.webhookSecretSealed = input.webhookSecretSealed;
+    if (input.displayName !== undefined) row.displayName = input.displayName;
+    if (input.supportedMethods !== undefined) row.supportedMethods = input.supportedMethods as never;
+    row.updatedAt = new Date().toISOString();
+    return row;
   }
   async getPaymentByIdGlobal(paymentId: string) {
     return this.payments.get(paymentId) ?? null;

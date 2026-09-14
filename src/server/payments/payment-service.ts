@@ -1,36 +1,150 @@
 /**
- * Payment service (Phase 4): M-Pesa initiation, provider callbacks, retries,
+ * Payment service (Phase 4B): M-Pesa initiation, provider callbacks, retries,
  * expiry sweeps and cash records — orchestrated over CommerceRepository.
  *
- * Money rules enforced here:
+ * Phase 4B change: the gateway is no longer a single global PaymentOS
+ * client. Every payment resolves
+ *
+ *   tenant → active PaymentConnection → PaymentOS tenant (merchant)
+ *
+ * and the gateway is constructed from that connection's sealed, server-side
+ * secrets. No client input can choose the connection, merchant, or amount.
+ *
+ * Money rules enforced here (unchanged from Phase 4):
  * - amounts always come from the authoritative order total (never the browser),
  * - no DB transaction is ever held open across a PaymentOS call,
  * - SUCCESS arrives only from verified provider confirmation (or cash),
  * - amount mismatches become explicit FAILED exceptions, never silent sales,
- * - SUCCESS + stock failure becomes needs_recovery (durable, recoverable),
- * - SMS/notifications happen post-commit, outside these functions.
+ * - SUCCESS + stock failure becomes needs_recovery (durable, recoverable).
  *
  * App-only module (imports the gateway + repository selector).
  */
 
+import {
+  PaymentConnectionError,
+  getConnectionWrapKey,
+  openConnectionSecret,
+  type OpsPaymentConnection,
+} from './connection.ts';
 import { PaymentError, assertConfirmationAmount, assertInitiationAmount, buildPaymentIdempotencyKey } from '../commerce/payments.ts';
 import type { CommerceRepository, OpsPayment } from '../commerce/repository.ts';
 import { GatewayError, type PaymentGateway } from './gateway.ts';
 import { MockPaymentProvider } from './mock-provider.ts';
 import { PaymentOSAdapter } from './paymentos.ts';
 
-export type PaymentServiceError = PaymentError | GatewayError;
+export type PaymentServiceError = PaymentError | GatewayError | PaymentConnectionError;
+
+/** Server-side environment separation: connections must match this. */
+export function getServerPaymentEnvironment(env: Record<string, string | undefined> = process.env): 'SANDBOX' | 'PRODUCTION' {
+  const explicit = (env.PAYMENTOS_ENVIRONMENT ?? '').trim().toUpperCase();
+  if (explicit === 'SANDBOX' || explicit === 'PRODUCTION') {
+    return explicit;
+  }
+  const production = env.APP_ENV === 'production' || env.NODE_ENV === 'production';
+  return production ? 'PRODUCTION' : 'SANDBOX';
+}
+
+/**
+ * True when this deployment has explicit PaymentOS platform configuration
+ * (base URL). In configured environments a tenant without a connection is a
+ * hard payment-unavailable error — never a silent mock fallback.
+ */
+function platformConfigured(env: Record<string, string | undefined>): boolean {
+  return Boolean((env.PAYMENTOS_BASE_URL ?? '').trim());
+}
+
+/**
+ * Build a gateway bound to one connection's sealed secrets. Secrets are
+ * opened in-memory only; they never reach logs, responses, or the caller.
+ */
+export function buildConnectionGateway(
+  connection: OpsPaymentConnection,
+  env: Record<string, string | undefined> = process.env,
+): PaymentOSAdapter {
+  const baseUrl = (env.PAYMENTOS_BASE_URL ?? '').trim().replace(/\/+$/, '');
+  if (!baseUrl) {
+    throw new GatewayError('gateway-unconfigured', 'PaymentOS platform endpoint is not configured.');
+  }
+  const key = getConnectionWrapKey(env);
+  const apiKey = openConnectionSecret(connection.secretSealed, key);
+  const webhookSecret = openConnectionSecret(connection.webhookSecretSealed, key);
+  if (!connection.providerTenantId) {
+    throw new PaymentConnectionError('connection-not-connected', 'Payment connection has no merchant identity.');
+  }
+  const timeoutMs = Number(env.PAYMENTOS_TIMEOUT_MS ?? 15000);
+  return new PaymentOSAdapter(
+    {
+      baseUrl,
+      apiKey,
+      tenantId: connection.providerTenantId,
+      webhookSecret,
+      timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 15000,
+    },
+  );
+}
+
+export type ConnectionResolution =
+  | { kind: 'connection'; connection: OpsPaymentConnection; gateway: PaymentOSAdapter }
+  | { kind: 'unconfigured-mock'; gateway: MockPaymentProvider };
+
+/**
+ * Resolve tenant → active PaymentConnection → gateway.
+ *
+ * - A CONNECTED connection in the server environment wins.
+ * - A CONNECTED connection in the WRONG environment is a hard error (never
+ *   silently routed).
+ * - Without any connection, only a NON-configured environment falls back to
+ *   the mock (local dev); a configured environment raises payment-unavailable.
+ */
+export async function resolveTenantGateway(
+  repo: CommerceRepository,
+  tenantId: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<ConnectionResolution> {
+  const serverEnvironment = getServerPaymentEnvironment(env);
+  const connection = await repo.getActiveConnection(tenantId);
+  if (connection) {
+    if (connection.environment !== serverEnvironment) {
+      throw new PaymentConnectionError(
+        'connection-environment-mismatch',
+        'The shop payment connection belongs to a different environment.',
+      );
+    }
+    return { kind: 'connection', connection, gateway: buildConnectionGateway(connection, env) };
+  }
+  if (platformConfigured(env)) {
+    throw new PaymentConnectionError('connection-not-connected', 'M-Pesa is not connected for this shop.');
+  }
+  return { kind: 'unconfigured-mock', gateway: new MockPaymentProvider(env) };
+}
+
+/** M-Pesa readiness for checkout/admin surfaces (no secrets in the result). */
+export async function getMpesaAvailability(
+  repo: CommerceRepository,
+  tenantId: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ available: boolean; reason: string | null; connectionId: string | null }> {
+  const serverEnvironment = getServerPaymentEnvironment(env);
+  const connection = await repo.getActiveConnection(tenantId);
+  if (!connection) {
+    return { available: platformConfigured(env) ? false : true, reason: platformConfigured(env) ? 'payment-not-connected' : null, connectionId: null };
+  }
+  if (connection.environment !== serverEnvironment) {
+    return { available: false, reason: 'payment-environment-mismatch', connectionId: connection.id };
+  }
+  if (connection.status !== 'CONNECTED' || !connection.supportedMethods.includes('MPESA')) {
+    return { available: false, reason: 'payment-not-connected', connectionId: connection.id };
+  }
+  return { available: true, reason: null, connectionId: connection.id };
+}
 
 export function getPaymentGateway(env: Record<string, string | undefined> = process.env): PaymentGateway {
-  try {
-    return PaymentOSAdapter.fromEnv(env);
-  } catch (error) {
-    if (error instanceof GatewayError && error.code === 'gateway-unconfigured') {
-      // No PaymentOS credentials: local/test mock (refuses production itself).
-      return new MockPaymentProvider(env);
-    }
-    throw error;
-  }
+  // Fallback gateway used ONLY for payments without a connection (local
+  // dev, tests, and pre-4B rows). Real initiation resolves the tenant's
+  // connection via resolveTenantGateway; a production environment refuses
+  // the mock itself (MockPaymentProvider constructor throws), so M-Pesa
+  // stays unavailable per-tenant until a real connection exists.
+  return new MockPaymentProvider(env);
 }
 
 export function getCallbackBaseUrl(env: Record<string, string | undefined> = process.env): string | null {
@@ -57,10 +171,11 @@ export type InitiateMpesaInput = {
  */
 export async function initiateMpesaPayment(
   repo: CommerceRepository,
-  gateway: PaymentGateway,
+  fallbackGateway: PaymentGateway,
   input: InitiateMpesaInput,
-  ctx: { now?: string } = {},
+  ctx: { now?: string; env?: Record<string, string | undefined> } = {},
 ): Promise<{ payment: OpsPayment; duplicate: boolean; providerRequestId: string }> {
+  const env = ctx.env ?? process.env;
   const found = await repo.getOrderWithItems(input.tenantId, input.orderId);
   if (!found) {
     throw new PaymentError('unknown-payment', 'Order not found for this shop.');
@@ -77,7 +192,18 @@ export async function initiateMpesaPayment(
     throw new PaymentError('invalid-phone', 'An M-Pesa payment needs the customer phone number.');
   }
 
-  const amount = assertInitiationAmount(order.total);
+  // Resolve the tenant's payment connection BEFORE any gateway work.
+  const resolution = await resolveTenantGateway(repo, input.tenantId, env);
+  const gateway = resolution.kind === 'connection' ? resolution.gateway : fallbackGateway;
+  const connection = resolution.kind === 'connection' ? resolution.connection : null;
+
+  // PaymentOS charges integer KES base units: the chargeable amount is the
+  // authoritative total rounded to whole KES (M-Pesa cannot charge cents).
+  const amount = Math.round(assertInitiationAmount(order.total));
+  if (amount <= 0) {
+    throw new PaymentError('invalid-amount', 'Payment amount must be greater than zero.');
+  }
+
   const existingAttempts = await repo.getPaymentsByOrder(input.tenantId, input.orderId);
   const pending = existingAttempts.find((payment) => payment.status === 'PENDING');
   if (pending && !input.idempotencyKey) {
@@ -90,7 +216,7 @@ export async function initiateMpesaPayment(
   const created = await repo.createPayment({
     tenantId: input.tenantId,
     orderId: input.orderId,
-    provider: gateway.provider === 'MOCK' ? 'PAYMENTOS' : gateway.provider,
+    provider: 'PAYMENTOS',
     method: 'MPESA',
     amount,
     currencyCode: order.currencyCode,
@@ -98,6 +224,9 @@ export async function initiateMpesaPayment(
     idempotencyKey: key,
     attemptNumber: attempt,
     expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    connection: connection
+      ? { connectionId: connection.id, providerMerchantId: connection.providerTenantId }
+      : null,
     createdBy: input.actorId,
   });
   if (created.duplicate) {
@@ -110,8 +239,11 @@ export async function initiateMpesaPayment(
       amount,
       currency: order.currencyCode,
       customerPhone: phone,
+      tenantId: connection?.providerTenantId ?? undefined,
+      reference: key,
       idempotencyKey: key,
       callbackUrl: input.callbackBaseUrl ? `${input.callbackBaseUrl}/api/v1/payments/callback?pid=${created.payment.id}` : null,
+      description: `HAPOS order ${input.orderId}`,
       metadata: { tenant_id: input.tenantId, order_id: input.orderId },
     });
     providerRequestId = initiated.providerRequestId;
@@ -161,26 +293,29 @@ export type CallbackOutcome =
   | { outcome: 'pending' };
 
 /**
- * Handle a verified provider callback. Verifies authenticity via the gateway
- * FIRST, then scopes everything to the payment's tenant. Convergent on
- * re-delivery: repeated callbacks return the stored outcome.
+ * Handle a verified provider callback.
+ *
+ * Association order (never trusts a body-supplied tenant):
+ *   rawBody → locate the HAPOS payment row (by ?pid= or provider request id)
+ *   → load THAT payment's connection → verify the webhook signature with the
+ *   connection's secret → only then act, scoped to the stored row's tenant.
  */
 export async function handlePaymentCallback(
   repo: CommerceRepository,
-  gateway: PaymentGateway,
-  input: { rawBody: string; headers: Record<string, string | undefined>; paymentId?: string | null },
+  fallbackGateway: PaymentGateway,
+  input: { rawBody: string; headers: Record<string, string | undefined>; paymentId?: string | null; env?: Record<string, string | undefined> },
 ): Promise<CallbackOutcome & { paymentId: string }> {
-  const event = gateway.parseCallback(input.rawBody, input.headers);
-
-  const payment = input.paymentId
-    ? await repo.getPaymentByIdGlobal(input.paymentId)
-    : null;
-  const located =
-    payment ??
-    (await findPaymentByProviderRequest(repo, event.providerRequestId));
+  const env = input.env ?? process.env;
+  const located = await locateCallbackPayment(repo, input.paymentId ?? null, input.rawBody);
   if (!located) {
     throw new PaymentError('unknown-payment', 'Callback references an unknown payment.');
   }
+
+  // Build the verifier from the payment's own connection when it has one;
+  // connection-less (mock/legacy) payments keep using the fallback gateway.
+  const gateway = await gatewayForCallback(repo, located, fallbackGateway, env);
+  const event = gateway.parseCallback(input.rawBody, input.headers);
+
   // From here everything is tenant-scoped to the stored payment row.
   const tenantId = located.tenantId;
   const verified = await repo.getPaymentByIdempotency(tenantId, located.idempotencyKey ?? '');
@@ -201,7 +336,7 @@ export async function handlePaymentCallback(
     }
     try {
       assertConfirmationAmount({
-        authoritativeTotal: found.order.total,
+        authoritativeTotal: Math.round(found.order.total),
         reportedTotal: event.amount,
         currency: found.order.currencyCode,
         reportedCurrency: event.currency,
@@ -238,7 +373,7 @@ export async function handlePaymentCallback(
     return { outcome: 'completed', paymentId: current.id, orderId, saleId: completed.sale.id };
   }
 
-  if (event.status === 'FAILED' || event.status === 'EXPIRED') {
+  if (event.status === 'FAILED' || event.status === 'EXPIRED' || event.status === 'CANCELLED') {
     await repo.transitionPayment({
       tenantId,
       paymentId: current.id,
@@ -254,11 +389,48 @@ export async function handlePaymentCallback(
   return { outcome: 'pending', paymentId: current.id };
 }
 
-async function findPaymentByProviderRequest(
+/** Correlate a callback to a payment row WITHOUT trusting the body. */
+async function locateCallbackPayment(repo: CommerceRepository, paymentId: string | null, rawBody: string): Promise<OpsPayment | null> {
+  if (paymentId) {
+    const byPid = await repo.getPaymentByIdGlobal(paymentId);
+    if (byPid) {
+      return byPid;
+    }
+  }
+  // Untrusted, read-only peek at the raw payload for the provider payment
+  // id — used only to find a candidate row; nothing is acted on until the
+  // connection-bound signature verification succeeds.
+  try {
+    const parsed = JSON.parse(rawBody) as { paymentId?: unknown; request_id?: unknown };
+    const providerRequestId = typeof parsed.paymentId === 'string' ? parsed.paymentId : typeof parsed.request_id === 'string' ? parsed.request_id : null;
+    if (providerRequestId) {
+      return repo.getPaymentByProviderRequestGlobal(providerRequestId);
+    }
+  } catch {
+    // Malformed JSON surfaces as gateway-malformed from parseCallback later.
+  }
+  return null;
+}
+
+async function gatewayForCallback(
   repo: CommerceRepository,
-  providerRequestId: string,
-): Promise<OpsPayment | null> {
-  return repo.getPaymentByProviderRequestGlobal(providerRequestId);
+  payment: OpsPayment,
+  fallbackGateway: PaymentGateway,
+  env: Record<string, string | undefined>,
+): Promise<PaymentGateway> {
+  if (!payment.connection?.connectionId) {
+    return fallbackGateway;
+  }
+  const connection = await repo.getConnectionById(payment.tenantId, payment.connection.connectionId);
+  if (!connection || connection.status !== 'CONNECTED') {
+    // Disconnected/replaced merchant: historical payments still verify via
+    // the connection row's stored secret even after disconnection (the row
+    // and its secrets are retained, status only gates NEW initiations).
+    if (!connection) {
+      throw new PaymentConnectionError('connection-not-found', 'Payment connection for this payment no longer exists.');
+    }
+  }
+  return buildConnectionGateway(connection, env);
 }
 
 export type RetryMpesaInput = {
@@ -272,8 +444,9 @@ export type RetryMpesaInput = {
 /** New attempt on the same order (history preserved; unsettled PENDING reused). */
 export async function retryMpesaPayment(
   repo: CommerceRepository,
-  gateway: PaymentGateway,
+  fallbackGateway: PaymentGateway,
   input: RetryMpesaInput,
+  ctx: { env?: Record<string, string | undefined> } = {},
 ) {
   const found = await repo.getOrderWithItems(input.tenantId, input.orderId);
   if (!found) {
@@ -282,13 +455,13 @@ export async function retryMpesaPayment(
   if (found.order.status === 'COMPLETED') {
     throw new PaymentError('invalid-transition', 'That order is already completed.');
   }
-  return initiateMpesaPayment(repo, gateway, {
+  return initiateMpesaPayment(repo, fallbackGateway, {
     tenantId: input.tenantId,
     orderId: input.orderId,
     actorId: input.actorId,
     customerPhone: input.customerPhone ?? found.order.customerPhone ?? null,
     callbackBaseUrl: input.callbackBaseUrl ?? null,
-  });
+  }, ctx);
 }
 
 /** Sweep overdue PENDING intents to EXPIRED. Returns the transitioned count. */

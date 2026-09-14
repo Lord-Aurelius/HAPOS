@@ -2,8 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { GatewayError } from '../src/server/payments/gateway.ts';
-import { MockPaymentProvider, mockProviderGuard, signTestCallback } from '../src/server/payments/mock-provider.ts';
-import { PaymentOSAdapter, paymentOSConfigFromEnv } from '../src/server/payments/paymentos.ts';
+import { MockPaymentProvider, mockProviderGuard } from '../src/server/payments/mock-provider.ts';
+import { PaymentOSAdapter, signPaymentOSWebhook } from '../src/server/payments/paymentos.ts';
 
 function assertGatewayCode(fn: () => unknown, code: string) {
   assert.throws(
@@ -52,101 +52,134 @@ function stubFetch(spec: StubSpec): typeof fetch {
 const CONFIG = {
   baseUrl: 'https://payos.example',
   apiKey: 'test-key',
-  merchantId: 'merchant-1',
-  callbackSecret: 'callback-secret',
+  tenantId: 'hapos-shop-1',
+  webhookSecret: 'whsec-test-secret',
   timeoutMs: 1000,
 };
 
-describe('paymentOSConfigFromEnv', () => {
-  it('requires the full credential set and trims the base URL', () => {
-    const config = paymentOSConfigFromEnv({
-      PAYMENTOS_BASE_URL: 'https://payos.example///',
-      PAYMENTOS_API_KEY: 'k',
-      PAYMENTOS_MERCHANT_ID: 'm',
-      PAYMENTOS_CALLBACK_SECRET: 's',
-    });
-    assert.equal(config?.baseUrl, 'https://payos.example');
-    assert.equal(
-      paymentOSConfigFromEnv({ PAYMENTOS_BASE_URL: 'https://x', PAYMENTOS_API_KEY: 'k' }),
-      null,
-    );
-    assert.throws(() => PaymentOSAdapter.fromEnv({}), GatewayError);
-  });
-});
-
-describe('PaymentOSAdapter.initiatePayment', () => {
-  it('sends the server-owned amount with auth and idempotency', async () => {
-    const spec: StubSpec = { body: { request_id: 'req-1', provider_reference: 'REF1', expires_at: '2026-01-01T00:00:00Z' } };
+describe('PaymentOSAdapter.initiatePayment (verified contract)', () => {
+  it('authenticates with x-api-key + tenant_id and integer KES amount', async () => {
+    const spec: StubSpec = { body: { payment: { id: 'pay_1', status: 'created' } } };
     const adapter = new PaymentOSAdapter(CONFIG, stubFetch(spec));
     const result = await adapter.initiatePayment({
       amount: 1850,
       currency: 'KES',
       customerPhone: '+254712345678',
-      merchantId: 'merchant-1',
+      tenantId: 'hapos-shop-1',
       idempotencyKey: 'pay-order-1-1',
       callbackUrl: 'https://shop.example/api/v1/payments/callback',
     });
-    assert.equal(result.providerRequestId, 'req-1');
+    assert.equal(result.providerRequestId, 'pay_1');
     const sent = JSON.parse(String((spec.seen?.[0]?.init as RequestInit).body));
+    assert.equal(sent.tenant_id, 'hapos-shop-1');
     assert.equal(sent.amount, 1850);
     assert.equal(sent.idempotency_key, 'pay-order-1-1');
-    assert.equal((spec.seen?.[0]?.init?.headers as Record<string, string>).authorization, 'Bearer test-key');
+    assert.ok(String(spec.seen?.[0]?.url).includes('/api/payments'));
+    assert.equal((spec.seen?.[0]?.init?.headers as Record<string, string>)['x-api-key'], 'test-key');
+    assert.equal((spec.seen?.[0]?.init?.headers as Record<string, string>).authorization, undefined);
   });
 
   it('maps rejection, timeout and malformed responses', async () => {
     await assertGatewayCodeAsync(
       () => new PaymentOSAdapter(CONFIG, stubFetch({ status: 402, body: { error: 'nope' } })).initiatePayment({
-        amount: 10, currency: 'KES', customerPhone: '+254700000000', merchantId: 'm', idempotencyKey: 'k', callbackUrl: null,
+        amount: 10, currency: 'KES', customerPhone: '+254700000000', tenantId: 't', idempotencyKey: 'k', callbackUrl: null,
       }),
       'gateway-rejected',
     );
     await assertGatewayCodeAsync(
       () => new PaymentOSAdapter(CONFIG, stubFetch({ hang: true })).initiatePayment({
-        amount: 10, currency: 'KES', customerPhone: '+254700000000', merchantId: 'm', idempotencyKey: 'k', callbackUrl: null,
+        amount: 10, currency: 'KES', customerPhone: '+254700000000', tenantId: 't', idempotencyKey: 'k', callbackUrl: null,
       }),
       'gateway-timeout',
     );
     await assertGatewayCodeAsync(
-      () => new PaymentOSAdapter(CONFIG, stubFetch({ body: { no_request: true } })).initiatePayment({
-        amount: 10, currency: 'KES', customerPhone: '+254700000000', merchantId: 'm', idempotencyKey: 'k', callbackUrl: null,
+      () => new PaymentOSAdapter(CONFIG, stubFetch({ body: { unexpected: true } })).initiatePayment({
+        amount: 10, currency: 'KES', customerPhone: '+254700000000', tenantId: 't', idempotencyKey: 'k', callbackUrl: null,
       }),
       'gateway-malformed',
     );
   });
-});
 
-describe('PaymentOSAdapter.verifyPayment', () => {
-  it('maps known statuses and quarantines the rest as UNKNOWN', async () => {
-    const ok = new PaymentOSAdapter(
-      CONFIG,
-      stubFetch({ body: { status: 'SUCCESS', provider_reference: 'R', amount: 1850, currency: 'KES' } }),
+  it('refuses non-positive amounts (PaymentOS needs integer base units)', async () => {
+    const adapter = new PaymentOSAdapter(CONFIG, stubFetch({}));
+    await assertGatewayCodeAsync(
+      () => adapter.initiatePayment({ amount: 0, currency: 'KES', customerPhone: '+254700000000', tenantId: 't', idempotencyKey: 'k', callbackUrl: null }),
+      'gateway-rejected',
     );
-    assert.deepEqual(await ok.verifyPayment('req-1'), {
-      status: 'SUCCESS', providerReference: 'R', amount: 1850, currency: 'KES', failureCode: null, failureReason: null,
-    });
-    const weird = new PaymentOSAdapter(CONFIG, stubFetch({ body: { status: 'WEIRD' } }));
-    assert.equal((await weird.verifyPayment('req-1')).status, 'UNKNOWN');
   });
 });
 
-describe('PaymentOSAdapter.parseCallback', () => {
-  const rawBody = JSON.stringify({ request_id: 'req-9', provider_reference: 'R9', amount: 500, currency: 'KES', status: 'SUCCESS' });
+describe('PaymentOSAdapter.checkHealth (verified contract)', () => {
+  it('treats an authenticated account list as connected and finds the M-Pesa destination', async () => {
+    const spec: StubSpec = {
+      body: {
+        payment_accounts: [
+          { id: 'pac_1', display_name: 'Shop Paybill', account_type: 'PAYBILL', environment: 'sandbox' },
+          { id: 'pac_2', display_name: 'Other', account_type: 'SEND_MONEY', environment: 'sandbox' },
+        ],
+      },
+    };
+    const adapter = new PaymentOSAdapter(CONFIG, stubFetch(spec));
+    const health = await adapter.checkHealth({ environment: 'SANDBOX' });
+    assert.equal(health.connected, true);
+    assert.equal(health.mpesaAccount?.id, 'pac_1');
+    assert.equal(health.mpesaAccount?.environment, 'SANDBOX');
+    assert.ok(String(spec.seen?.[0]?.url).includes('/api/payment-accounts'));
+  });
 
-  it('accepts correctly signed callbacks', () => {
+  it('distinguishes unauthorized from unreachable', async () => {
+    const unauthorized = new PaymentOSAdapter(CONFIG, stubFetch({ status: 401, body: { error: 'invalid tenant credentials' } }));
+    assert.deepEqual(await unauthorized.checkHealth({}), { connected: false, mpesaAccount: null, failure: 'unauthorized' });
+    const unreachable = new PaymentOSAdapter(CONFIG, stubFetch({ status: 500, body: null }));
+    assert.deepEqual(await unreachable.checkHealth({}), { connected: false, mpesaAccount: null, failure: 'unreachable' });
+  });
+});
+
+describe('PaymentOSAdapter.parseCallback (verified webhook contract)', () => {
+  const payload = {
+    event: 'payment.completed',
+    paymentId: 'pay_9',
+    applicationId: 'hapos-shop-1',
+    amount: 500,
+    currency: 'KES',
+    reference: 'pay-order-9-1',
+    providerReceipt: 'RKTQDM7W6S',
+    invoice_id: 'pay-order-9-1',
+    status: 'paid',
+  };
+  const rawBody = JSON.stringify(payload);
+
+  it('accepts correctly signed webhooks (t=,v1= over canonical JSON)', () => {
     const adapter = new PaymentOSAdapter(CONFIG, stubFetch({}));
-    const event = adapter.parseCallback(rawBody, { 'x-paymentos-signature': signTestCallback(rawBody, 'callback-secret') });
-    assert.equal(event.providerRequestId, 'req-9');
+    const event = adapter.parseCallback(rawBody, { 'x-paymentos-signature': signPaymentOSWebhook(payload, 'whsec-test-secret') });
+    assert.equal(event.providerRequestId, 'pay_9');
     assert.equal(event.status, 'SUCCESS');
     assert.equal(event.amount, 500);
+    assert.equal(event.providerReference, 'RKTQDM7W6S');
   });
 
-  it('rejects forged, missing and malformed callbacks', () => {
+  it('verifies signatures over key-sorted canonical JSON (field order independent)', () => {
     const adapter = new PaymentOSAdapter(CONFIG, stubFetch({}));
-    assertGatewayCode(() => adapter.parseCallback(rawBody, { 'x-paymentos-signature': 'forged' }), 'callback-unauthenticated');
+    const reordered = JSON.stringify({ status: 'paid', amount: 500, event: 'payment.completed', paymentId: 'pay_9' });
+    const event = adapter.parseCallback(
+      reordered,
+      { 'x-paymentos-signature': signPaymentOSWebhook({ amount: 500, event: 'payment.completed', paymentId: 'pay_9', status: 'paid' }, 'whsec-test-secret') },
+    );
+    assert.equal(event.providerRequestId, 'pay_9');
+  });
+
+  it('rejects forged, missing, stale and malformed callbacks', () => {
+    const adapter = new PaymentOSAdapter(CONFIG, stubFetch({}));
+    assertGatewayCode(() => adapter.parseCallback(rawBody, { 'x-paymentos-signature': 't=1,v1=deadbeef' }), 'callback-unauthenticated');
     assertGatewayCode(() => adapter.parseCallback(rawBody, {}), 'callback-unauthenticated');
     assertGatewayCode(
-      () => adapter.parseCallback('not-json', { 'x-paymentos-signature': signTestCallback('not-json', 'callback-secret') }),
+      () => adapter.parseCallback('not-json', { 'x-paymentos-signature': signPaymentOSWebhook({ a: 1 }, 'whsec-test-secret') }),
       'gateway-malformed',
+    );
+    // Wrong secret (e.g. another tenant's webhook secret) must fail.
+    assertGatewayCode(
+      () => adapter.parseCallback(rawBody, { 'x-paymentos-signature': signPaymentOSWebhook(payload, 'whsec-other-tenant') }),
+      'callback-unauthenticated',
     );
   });
 });
@@ -155,7 +188,7 @@ describe('MockPaymentProvider', () => {
   it('drives the lifecycle explicitly without network', async () => {
     const mock = new MockPaymentProvider({ NODE_ENV: 'test' });
     const initiated = await mock.initiatePayment({
-      amount: 1000, currency: 'KES', customerPhone: '+254700000001', merchantId: 'm', idempotencyKey: 'k1', callbackUrl: null,
+      amount: 1000, currency: 'KES', customerPhone: '+254700000001', tenantId: 't', idempotencyKey: 'k1', callbackUrl: null,
     });
     assert.equal((await mock.verifyPayment(initiated.providerRequestId)).status, 'PENDING');
     mock.completeIntent(initiated.providerRequestId);
@@ -170,12 +203,12 @@ describe('MockPaymentProvider', () => {
   it('supports failure and expiry hooks', async () => {
     const mock = new MockPaymentProvider({ NODE_ENV: 'test' });
     const failed = await mock.initiatePayment({
-      amount: 100, currency: 'KES', customerPhone: '+254700000001', merchantId: 'm', idempotencyKey: 'k2', callbackUrl: null,
+      amount: 100, currency: 'KES', customerPhone: '+254700000001', tenantId: 't', idempotencyKey: 'k2', callbackUrl: null,
     });
     mock.failIntent(failed.providerRequestId);
     assert.equal((await mock.verifyPayment(failed.providerRequestId)).status, 'FAILED');
     const expired = await mock.initiatePayment({
-      amount: 100, currency: 'KES', customerPhone: '+254700000001', merchantId: 'm', idempotencyKey: 'k3', callbackUrl: null,
+      amount: 100, currency: 'KES', customerPhone: '+254700000001', tenantId: 't', idempotencyKey: 'k3', callbackUrl: null,
     });
     mock.expireIntent(expired.providerRequestId);
     assert.equal((await mock.verifyPayment(expired.providerRequestId)).status, 'EXPIRED');

@@ -16,6 +16,8 @@ import { createHmac } from 'node:crypto';
 import {
   GatewayError,
   type GatewayCallbackEvent,
+  type GatewayHealthInput,
+  type GatewayHealthResult,
   type GatewayInitiateInput,
   type GatewayInitiateResult,
   type GatewayStatus,
@@ -89,6 +91,21 @@ export class MockPaymentProvider implements PaymentGateway {
       currency: intent.currency,
       failureCode: intent.failureCode,
       failureReason: intent.failureReason,
+    };
+  }
+
+  async checkHealth(_input: GatewayHealthInput): Promise<GatewayHealthResult> {
+    // The mock is always "configured": one fake M-Pesa destination in the
+    // caller-claimed environment so the admin connection test has a path in
+    // local/file mode.
+    return {
+      connected: true,
+      mpesaAccount: {
+        id: 'mock-account-1',
+        displayName: 'Mock M-Pesa destination',
+        environment: _input.environment ?? 'SANDBOX',
+      },
+      failure: null,
     };
   }
 
