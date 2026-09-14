@@ -48,6 +48,7 @@ describe('PostgresCommerceRepository', { skip: !DATABASE_URL }, () => {
       'db/migrations/phase-03c-qr-persistence.sql',
       'db/migrations/phase-04-payments.sql',
       'db/migrations/phase-04b-tenant-policy.sql',
+      'db/migrations/phase-4b-payment-connections.sql',
     ]) {
       await pool.query(readFileSync(join(repoRoot, file), 'utf8'));
     }
