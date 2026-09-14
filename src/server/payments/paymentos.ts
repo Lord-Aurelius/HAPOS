@@ -101,15 +101,28 @@ function mapEventStatus(event: string): GatewayStatus {
   }
 }
 
+let paymentOSFetchOverride: typeof fetch | null = null;
+
+/**
+ * Test hook: override the fetch implementation used by every adapter that
+ * does not receive an explicit one. Pass null to restore global fetch.
+ * Never call from production code paths.
+ */
+export function setPaymentOSFetchForTests(fetchImpl: typeof fetch | null): void {
+  paymentOSFetchOverride = fetchImpl;
+}
+
 export class PaymentOSAdapter implements PaymentGateway {
   readonly provider = 'PAYMENTOS' as const;
 
   private readonly config: PaymentOSConfig;
   private readonly fetchImpl: typeof fetch;
 
-  constructor(config: PaymentOSConfig, fetchImpl: typeof fetch = fetch) {
+  constructor(config: PaymentOSConfig, fetchImpl?: typeof fetch) {
     this.config = config;
-    this.fetchImpl = fetchImpl;
+    // Explicit injection wins (unit tests), then the process-wide test hook,
+    // then global fetch.
+    this.fetchImpl = fetchImpl ?? paymentOSFetchOverride ?? fetch;
   }
 
   private async request(path: string, init: RequestInit): Promise<Record<string, unknown>> {
