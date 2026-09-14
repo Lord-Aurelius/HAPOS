@@ -467,6 +467,31 @@ export type StoreSaleAmendment = {
   createdAt: string;
 };
 
+/**
+ * Phase 4B payment connection (SQL-authoritative in postgres mode; file-mode
+ * projection keeps local development and tests working). Sealed secret blobs
+ * live only here and in SQL — mappers strip them at every read boundary.
+ */
+export type StorePaymentConnection = {
+  id: string;
+  tenantId: string;
+  provider: string;
+  providerTenantId?: string | null;
+  environment: string;
+  status: string;
+  displayName?: string | null;
+  supportedMethods?: string[];
+  connectedAt?: string | null;
+  lastVerifiedAt?: string | null;
+  disconnectedAt?: string | null;
+  lastCheckCode?: string | null;
+  lastCheckMessage?: string | null;
+  secretSealed?: string | null;
+  webhookSecretSealed?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StorePayment = {
   id: string;
   tenantId: string;
@@ -490,6 +515,9 @@ export type StorePayment = {
   failureReason?: string | null;
   needsRecovery?: boolean;
   recoveryReason?: string | null;
+  /** Phase 4B: connection + provider merchant snapshot (historical audit). */
+  connectionId?: string | null;
+  providerMerchantId?: string | null;
   createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -530,4 +558,6 @@ export type StoreState = {
   saleAmendments: StoreSaleAmendment[];
   // Phase 4 transitional projection (SQL-authoritative: phase-04-payments).
   payments: StorePayment[];
+  // Phase 4B transitional projection (SQL-authoritative: phase-4b-payment-connections).
+  paymentConnections: StorePaymentConnection[];
 };

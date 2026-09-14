@@ -110,6 +110,7 @@ for (const file of migrationFiles) {
 
 // Vocabulary parity: SQL CHECK lists vs TS engine unions.
 const commerceDir = path.join(root, 'src', 'server', 'commerce');
+const paymentsDir = path.join(root, 'src', 'server', 'payments');
 const parityChecks = [
   {
     sqlFile: 'phase-01-catalog-inventory.sql',
@@ -167,11 +168,35 @@ const parityChecks = [
     tsType: 'PaymentMethod',
     label: 'payment methods',
   },
+  {
+    sqlFile: 'phase-4b-payment-connections.sql',
+    anchor: 'payment_connection_status_check',
+    tsFile: 'connection.ts',
+    tsType: 'PaymentConnectionStatus',
+    tsDir: 'payments',
+    label: 'payment connection statuses',
+  },
+  {
+    sqlFile: 'phase-4b-payment-connections.sql',
+    anchor: 'payment_connection_provider_check',
+    tsFile: 'connection.ts',
+    tsType: 'PaymentConnectionProvider',
+    tsDir: 'payments',
+    label: 'payment connection providers',
+  },
+  {
+    sqlFile: 'phase-4b-payment-connections.sql',
+    anchor: 'payment_connection_environment_check',
+    tsFile: 'connection.ts',
+    tsType: 'PaymentConnectionEnvironment',
+    tsDir: 'payments',
+    label: 'payment connection environments',
+  },
 ];
 
 for (const check of parityChecks) {
   const sqlPath = path.join(migrationsDir, check.sqlFile);
-  const tsPath = path.join(commerceDir, check.tsFile);
+  const tsPath = path.join(check.tsDir ? path.join(root, 'src', 'server', check.tsDir) : commerceDir, check.tsFile);
   if (!fs.existsSync(sqlPath) || !fs.existsSync(tsPath)) {
     console.log(`SKIP: ${check.label} (files not both present yet)`);
     continue;

@@ -44,6 +44,14 @@ import {
   type PaymentStatus,
 } from './payments.ts';
 import { SellerError, hashSellerBearer } from './seller.ts';
+import { PaymentConnectionError } from '../payments/connection.ts';
+import type {
+  OpsPaymentConnection,
+  PaymentConnectionEnvironment,
+  PaymentConnectionMethod,
+  PaymentConnectionProvider,
+  PaymentConnectionStatus,
+} from '../payments/connection.ts';
 import type {
   CommerceRepository,
   CreateOrderInput,
@@ -936,13 +944,14 @@ export class PostgresCommerceRepository implements CommerceRepository {
       const id = newId(ctx);
       try {
         await client.query(
-          `insert into payments (id, tenant_id, order_id, sale_id, provider, method, status, amount, currency_code, customer_phone, provider_reference, provider_request_id, idempotency_key, attempt_number, initiated_at, expires_at, created_by, created_at, updated_at)
-           values ($1,$2,$3,$4,$5,$6,'PENDING',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$14,$14)`,
+          `insert into payments (id, tenant_id, order_id, sale_id, provider, method, status, amount, currency_code, customer_phone, provider_reference, provider_request_id, idempotency_key, attempt_number, initiated_at, expires_at, payment_connection_id, provider_merchant_id, created_by, created_at, updated_at)
+           values ($1,$2,$3,$4,$5,$6,'PENDING',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$14,$14)`,
           [
             id, input.tenantId, input.orderId ?? null, input.saleId ?? null, input.provider, input.method,
             input.amount, input.currencyCode, input.customerPhone ?? null, input.providerReference ?? null,
             input.providerRequestId ?? null, input.idempotencyKey, input.attemptNumber, now,
-            input.expiresAt ?? null, input.createdBy ?? null,
+            input.expiresAt ?? null, input.connection?.connectionId ?? null, input.connection?.providerMerchantId ?? null,
+            input.createdBy ?? null,
           ],
         );
       } catch (error) {
@@ -1577,6 +1586,126 @@ export class PostgresCommerceRepository implements CommerceRepository {
     );
     return rows.map((row) => mapPaymentRow(row as Record<string, unknown>));
   }
+
+  // ── payment connections (Phase 4B) ──
+
+  async getConnectionById(tenantId: string, connectionId: string) {
+    const { rows } = await this.pool.query(
+      `select * from payment_connections where tenant_id = $1 and id = $2`,
+      [tenantId, connectionId],
+    );
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? mapConnectionRow(row) : null;
+  }
+
+  async getActiveConnection(tenantId: string, environment?: PaymentConnectionEnvironment) {
+    const conditions = [`tenant_id = $1`, `status = 'CONNECTED'`];
+    const params: unknown[] = [tenantId];
+    if (environment) {
+      conditions.push(`environment = $2`);
+      params.push(environment);
+    }
+    const { rows } = await this.pool.query(
+      `select * from payment_connections where ${conditions.join(' and ')} order by connected_at desc limit 1`,
+      params,
+    );
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? mapConnectionRow(row) : null;
+  }
+
+  async listConnections(tenantId: string) {
+    const { rows } = await this.pool.query(
+      `select * from payment_connections where tenant_id = $1 order by created_at desc`,
+      [tenantId],
+    );
+    return rows.map((row) => mapConnectionRow(row as Record<string, unknown>));
+  }
+
+  async findConnectionByProviderTenantId(providerTenantId: string) {
+    const { rows } = await this.pool.query(
+      `select * from payment_connections where provider_tenant_id = $1 order by created_at desc limit 1`,
+      [providerTenantId],
+    );
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? mapConnectionRow(row) : null;
+  }
+
+  async createConnection(
+    input: {
+      tenantId: string;
+      provider: PaymentConnectionProvider;
+      providerTenantId: string;
+      environment: PaymentConnectionEnvironment;
+      status: PaymentConnectionStatus;
+      displayName?: string | null;
+      supportedMethods: PaymentConnectionMethod[];
+      secretSealed: string | null;
+      webhookSecretSealed: string | null;
+      connectedAt?: string | null;
+      lastVerifiedAt?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    const now = nowISO(ctx);
+    const id = newId(ctx);
+    await this.pool.query(
+      `insert into payment_connections
+        (id, tenant_id, provider, provider_tenant_id, environment, status, display_name, supported_methods, connected_at, last_verified_at, secret_sealed, webhook_secret_sealed, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)`,
+      [
+        id, input.tenantId, input.provider, input.providerTenantId, input.environment, input.status,
+        input.displayName ?? null, input.supportedMethods, input.connectedAt ?? null,
+        input.lastVerifiedAt ?? null, input.secretSealed, input.webhookSecretSealed, now,
+      ],
+    );
+    const created = await this.pool.query(`select * from payment_connections where tenant_id = $1 and id = $2`, [input.tenantId, id]);
+    return mapConnectionRow(created.rows[0] as Record<string, unknown>);
+  }
+
+  async updateConnection(
+    input: {
+      tenantId: string;
+      connectionId: string;
+      status?: PaymentConnectionStatus;
+      displayName?: string | null;
+      supportedMethods?: PaymentConnectionMethod[];
+      secretSealed?: string | null;
+      webhookSecretSealed?: string | null;
+      connectedAt?: string | null;
+      lastVerifiedAt?: string | null;
+      disconnectedAt?: string | null;
+      lastCheckCode?: string | null;
+      lastCheckMessage?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    const now = nowISO(ctx);
+    const setClauses: string[] = [`updated_at = $3`];
+    const params: unknown[] = [input.tenantId, input.connectionId, now];
+    const assign = (column: string, value: unknown) => {
+      setClauses.push(`${column} = $${params.length + 1}`);
+      params.push(value);
+    };
+    if (input.status !== undefined) assign('status', input.status);
+    if (input.displayName !== undefined) assign('display_name', input.displayName);
+    if (input.supportedMethods !== undefined) assign('supported_methods', input.supportedMethods);
+    if (input.secretSealed !== undefined) assign('secret_sealed', input.secretSealed);
+    if (input.webhookSecretSealed !== undefined) assign('webhook_secret_sealed', input.webhookSecretSealed);
+    if (input.connectedAt !== undefined) assign('connected_at', input.connectedAt);
+    if (input.lastVerifiedAt !== undefined) assign('last_verified_at', input.lastVerifiedAt);
+    if (input.disconnectedAt !== undefined) assign('disconnected_at', input.disconnectedAt);
+    if (input.lastCheckCode !== undefined) assign('last_check_code', input.lastCheckCode);
+    if (input.lastCheckMessage !== undefined) assign('last_check_message', input.lastCheckMessage);
+    const updated = await this.pool.query(
+      `update payment_connections set ${setClauses.join(', ')} where tenant_id = $1 and id = $2 returning *`,
+      params,
+    );
+    const row = updated.rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new PaymentConnectionError('connection-not-found', 'Payment connection not found for this shop.');
+    }
+    return mapConnectionRow(row);
+  }
 }
 
 // ── row mappers (snake_case → ops) ───────────────────────────────────────────
@@ -1711,7 +1840,33 @@ function mapPaymentRow(row: Record<string, unknown>): OpsPayment {
     failureReason: (row.failure_reason as string | null) ?? null,
     needsRecovery: (row.needs_recovery as boolean | null) ?? false,
     recoveryReason: (row.recovery_reason as string | null) ?? null,
+    connection: row.payment_connection_id
+      ? { connectionId: row.payment_connection_id as string, providerMerchantId: (row.provider_merchant_id as string | null) ?? null }
+      : null,
     createdBy: (row.created_by as string | null) ?? null,
+    createdAt: toISO(row.created_at),
+    updatedAt: toISO(row.updated_at),
+  };
+}
+
+function mapConnectionRow(row: Record<string, unknown>): OpsPaymentConnection {
+  const methods = Array.isArray(row.supported_methods) ? (row.supported_methods as string[]) : [];
+  return {
+    id: row.id as string,
+    tenantId: row.tenant_id as string,
+    provider: row.provider as PaymentConnectionProvider,
+    providerTenantId: (row.provider_tenant_id as string | null) ?? null,
+    environment: row.environment as PaymentConnectionEnvironment,
+    status: row.status as PaymentConnectionStatus,
+    displayName: (row.display_name as string | null) ?? null,
+    supportedMethods: methods as PaymentConnectionMethod[],
+    connectedAt: row.connected_at ? toISO(row.connected_at) : null,
+    lastVerifiedAt: row.last_verified_at ? toISO(row.last_verified_at) : null,
+    disconnectedAt: row.disconnected_at ? toISO(row.disconnected_at) : null,
+    lastCheckCode: (row.last_check_code as string | null) ?? null,
+    lastCheckMessage: (row.last_check_message as string | null) ?? null,
+    secretSealed: (row.secret_sealed as string | null) ?? null,
+    webhookSecretSealed: (row.webhook_secret_sealed as string | null) ?? null,
     createdAt: toISO(row.created_at),
     updatedAt: toISO(row.updated_at),
   };

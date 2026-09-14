@@ -35,6 +35,13 @@ import type {
 } from '@/lib/types';
 import type { InventoryMovementType } from './inventory.ts';
 import type { PaymentMethod, PaymentProvider, PaymentStatus } from './payments.ts';
+import type {
+  OpsPaymentConnection,
+  PaymentConnectionEnvironment,
+  PaymentConnectionMethod,
+  PaymentConnectionProvider,
+  PaymentConnectionStatus,
+} from '@/server/payments/connection.ts';
 
 export type { CreateOrderInput };
 export type { OpContext };
@@ -45,6 +52,16 @@ export type {
   OpsSale,
   OpsSaleItem,
 } from './commerce-store.ts';
+
+/**
+ * Input for recording a connection snapshot on a payment at initiation.
+ * The snapshot keeps historical payments understandable even after the
+ * connection is later disconnected or replaced.
+ */
+export type OpsPaymentConnectionSnapshot = {
+  connectionId: string;
+  providerMerchantId: string | null;
+};
 
 export type OpsPayment = {
   id: string;
@@ -69,6 +86,8 @@ export type OpsPayment = {
   failureReason?: string | null;
   needsRecovery?: boolean;
   recoveryReason?: string | null;
+  /** Phase 4B: the connection (+ merchant snapshot) that produced this payment. */
+  connection?: OpsPaymentConnectionSnapshot | null;
   createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +134,8 @@ export type OpsSellerContext = {
 };
 
 export type CreatePaymentInput = {
+  /** Phase 4B: connection that produced this payment (snapshot persisted). */
+  connection?: OpsPaymentConnectionSnapshot | null;
   tenantId: string;
   orderId?: string | null;
   saleId?: string | null;
@@ -272,4 +293,45 @@ export interface CommerceRepository {
   getSellerSales(tenantId: string, sellerId: string): Promise<{ orders: OpsOrder[]; sales: OpsSale[] }>;
   getAdminOrders(tenantId: string): Promise<OpsOrder[]>;
   listPayments(tenantId: string, filters?: { orderId?: string; status?: PaymentStatus; needsRecovery?: boolean }): Promise<OpsPayment[]>;
+
+  // ── payment connections (Phase 4B) ──
+  getConnectionById(tenantId: string, connectionId: string): Promise<OpsPaymentConnection | null>;
+  /** The active connection for a tenant+environment; null when none is CONNECTED. */
+  getActiveConnection(tenantId: string, environment?: PaymentConnectionEnvironment): Promise<OpsPaymentConnection | null>;
+  listConnections(tenantId: string): Promise<OpsPaymentConnection[]>;
+  /** Find a connection by provider tenant id across ALL tenants (connect flow dedup). */
+  findConnectionByProviderTenantId(providerTenantId: string): Promise<OpsPaymentConnection | null>;
+  createConnection(
+    input: {
+      tenantId: string;
+      provider: PaymentConnectionProvider;
+      providerTenantId: string;
+      environment: PaymentConnectionEnvironment;
+      status: PaymentConnectionStatus;
+      displayName?: string | null;
+      supportedMethods: PaymentConnectionMethod[];
+      secretSealed: string | null;
+      webhookSecretSealed: string | null;
+      connectedAt?: string | null;
+      lastVerifiedAt?: string | null;
+    },
+    ctx?: OpContext,
+  ): Promise<OpsPaymentConnection>;
+  updateConnection(
+    input: {
+      tenantId: string;
+      connectionId: string;
+      status?: PaymentConnectionStatus;
+      displayName?: string | null;
+      supportedMethods?: PaymentConnectionMethod[];
+      secretSealed?: string | null;
+      webhookSecretSealed?: string | null;
+      connectedAt?: string | null;
+      lastVerifiedAt?: string | null;
+      disconnectedAt?: string | null;
+      lastCheckCode?: string | null;
+      lastCheckMessage?: string | null;
+    },
+    ctx?: OpContext,
+  ): Promise<OpsPaymentConnection>;
 }

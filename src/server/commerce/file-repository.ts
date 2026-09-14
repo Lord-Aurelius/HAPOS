@@ -31,6 +31,14 @@ import {
 } from '@/server/commerce/commerce-store';
 import { CommerceError } from '@/server/commerce/orders';
 import { PaymentError, transitionPaymentStatus } from '@/server/commerce/payments';
+import { PaymentConnectionError } from '@/server/payments/connection';
+import type {
+  OpsPaymentConnection,
+  PaymentConnectionEnvironment,
+  PaymentConnectionMethod,
+  PaymentConnectionProvider,
+  PaymentConnectionStatus,
+} from '@/server/payments/connection';
 import {
   touchSellerCredentialUsed,
   verifySellerCredential as verifySellerCredentialOp,
@@ -53,7 +61,7 @@ import type {
   TransitionPaymentInput,
 } from '@/server/commerce/repository';
 import { readStore, updateStore } from '@/server/store';
-import type { StoreState } from '@/server/store/types';
+import type { StorePaymentConnection, StoreState } from '@/server/store/types';
 import { voidServiceRecord } from '@/server/store/service-records';
 import {
   orderFromStore,
@@ -75,6 +83,28 @@ function paymentRow(store: StoreState, tenantId: string, paymentId: string) {
     throw new PaymentError('unknown-payment', 'Payment not found for this shop.');
   }
   return payment;
+}
+
+function toOpsConnection(row: StorePaymentConnection): OpsPaymentConnection {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    provider: row.provider as PaymentConnectionProvider,
+    providerTenantId: row.providerTenantId ?? null,
+    environment: row.environment as PaymentConnectionEnvironment,
+    status: row.status as PaymentConnectionStatus,
+    displayName: row.displayName ?? null,
+    supportedMethods: (row.supportedMethods ?? []) as PaymentConnectionMethod[],
+    connectedAt: row.connectedAt ?? null,
+    lastVerifiedAt: row.lastVerifiedAt ?? null,
+    disconnectedAt: row.disconnectedAt ?? null,
+    lastCheckCode: row.lastCheckCode ?? null,
+    lastCheckMessage: row.lastCheckMessage ?? null,
+    secretSealed: row.secretSealed ?? null,
+    webhookSecretSealed: row.webhookSecretSealed ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 function toOpsPayment(row: StoreState['payments'][number]): OpsPayment {
@@ -101,6 +131,9 @@ function toOpsPayment(row: StoreState['payments'][number]): OpsPayment {
     failureReason: row.failureReason ?? null,
     needsRecovery: row.needsRecovery ?? false,
     recoveryReason: row.recoveryReason ?? null,
+    connection: row.connectionId
+      ? { connectionId: row.connectionId, providerMerchantId: row.providerMerchantId ?? null }
+      : null,
     createdBy: row.createdBy ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -334,6 +367,8 @@ export class FileCommerceRepository implements CommerceRepository {
         failureReason: null,
         needsRecovery: false,
         recoveryReason: null,
+        connectionId: input.connection?.connectionId ?? null,
+        providerMerchantId: input.connection?.providerMerchantId ?? null,
         createdBy: input.createdBy ?? null,
         createdAt: now,
         updatedAt: now,
@@ -405,6 +440,124 @@ export class FileCommerceRepository implements CommerceRepository {
       row.recoveryReason = reason;
       row.updatedAt = ctx.now ?? new Date().toISOString();
       return toOpsPayment(row);
+    });
+  }
+
+  // ── payment connections (Phase 4B) ──
+
+  async getConnectionById(tenantId: string, connectionId: string) {
+    const store = await readStore();
+    const row = (store.paymentConnections ?? []).find((item) => item.tenantId === tenantId && item.id === connectionId) ?? null;
+    return row ? toOpsConnection(row) : null;
+  }
+
+  async getActiveConnection(tenantId: string, environment?: PaymentConnectionEnvironment) {
+    const store = await readStore();
+    const row = (store.paymentConnections ?? []).find(
+      (item) =>
+        item.tenantId === tenantId &&
+        item.status === 'CONNECTED' &&
+        (!environment || item.environment === environment),
+    ) ?? null;
+    return row ? toOpsConnection(row) : null;
+  }
+
+  async listConnections(tenantId: string) {
+    const store = await readStore();
+    return (store.paymentConnections ?? [])
+      .filter((item) => item.tenantId === tenantId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(toOpsConnection);
+  }
+
+  async findConnectionByProviderTenantId(providerTenantId: string) {
+    const store = await readStore();
+    const row = (store.paymentConnections ?? []).find((item) => item.providerTenantId === providerTenantId) ?? null;
+    return row ? toOpsConnection(row) : null;
+  }
+
+  async createConnection(
+    input: {
+      tenantId: string;
+      provider: PaymentConnectionProvider;
+      providerTenantId: string;
+      environment: PaymentConnectionEnvironment;
+      status: PaymentConnectionStatus;
+      displayName?: string | null;
+      supportedMethods: PaymentConnectionMethod[];
+      secretSealed: string | null;
+      webhookSecretSealed: string | null;
+      connectedAt?: string | null;
+      lastVerifiedAt?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    void ctx;
+    return updateStore((store) => {
+      const now = ctx.now ?? new Date().toISOString();
+      const row: StorePaymentConnection = {
+        id: ctx.generateId ? ctx.generateId() : randomUUID(),
+        tenantId: input.tenantId,
+        provider: input.provider,
+        providerTenantId: input.providerTenantId,
+        environment: input.environment,
+        status: input.status,
+        displayName: input.displayName ?? null,
+        supportedMethods: [...input.supportedMethods],
+        connectedAt: input.connectedAt ?? null,
+        lastVerifiedAt: input.lastVerifiedAt ?? null,
+        disconnectedAt: null,
+        lastCheckCode: null,
+        lastCheckMessage: null,
+        secretSealed: input.secretSealed,
+        webhookSecretSealed: input.webhookSecretSealed,
+        createdAt: now,
+        updatedAt: now,
+      };
+      store.paymentConnections ??= [];
+      store.paymentConnections.push(row);
+      return toOpsConnection(row);
+    });
+  }
+
+  async updateConnection(
+    input: {
+      tenantId: string;
+      connectionId: string;
+      status?: PaymentConnectionStatus;
+      displayName?: string | null;
+      supportedMethods?: PaymentConnectionMethod[];
+      secretSealed?: string | null;
+      webhookSecretSealed?: string | null;
+      connectedAt?: string | null;
+      lastVerifiedAt?: string | null;
+      disconnectedAt?: string | null;
+      lastCheckCode?: string | null;
+      lastCheckMessage?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    void ctx;
+    return updateStore((store) => {
+      const row = (store.paymentConnections ?? []).find(
+        (item) => item.tenantId === input.tenantId && item.id === input.connectionId,
+      ) ?? null;
+      if (!row) {
+        throw new PaymentConnectionError('connection-not-found', 'Payment connection not found for this shop.');
+      }
+      const now = ctx.now ?? new Date().toISOString();
+      if (input.status !== undefined) row.status = input.status;
+      if (input.displayName !== undefined) row.displayName = input.displayName;
+      if (input.supportedMethods !== undefined) row.supportedMethods = [...input.supportedMethods];
+      if (input.secretSealed !== undefined) row.secretSealed = input.secretSealed;
+      if (input.webhookSecretSealed !== undefined) row.webhookSecretSealed = input.webhookSecretSealed;
+      if (input.connectedAt !== undefined) row.connectedAt = input.connectedAt;
+      if (input.lastVerifiedAt !== undefined) row.lastVerifiedAt = input.lastVerifiedAt;
+      if (input.disconnectedAt !== undefined) row.disconnectedAt = input.disconnectedAt;
+      if (input.lastCheckCode !== undefined) row.lastCheckCode = input.lastCheckCode;
+      if (input.lastCheckMessage !== undefined) row.lastCheckMessage = input.lastCheckMessage;
+      row.updatedAt = now;
+      return toOpsConnection(row);
     });
   }
 
