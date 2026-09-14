@@ -21,6 +21,8 @@ import {
   connectPaymentOS,
   disconnectConnection,
   getPaymentSettings,
+  listConnectionsForAudit,
+  rotateConnectionCredentials,
   verifyConnection,
 } from '../src/server/payments/connection-service.ts';
 import {
@@ -343,5 +345,159 @@ describe('callback association and historical integrity', () => {
     const secret = openConnectionSecret(sealed, getConnectionWrapKey(ENV)!);
     const header = signPaymentOSWebhook(payload, secret);
     assert.match(header, /^t=\d+,v1=[0-9a-f]{64}$/);
+  });
+});
+
+describe('credential rotation (verified-before-activate cutover)', () => {
+  let repo: MemoryRepo;
+  beforeEach(() => {
+    repo = new MemoryRepo({ NODE_ENV: 'test' });
+    stubPaymentOSHealth({ connected: true, mpesaAccount: { id: 'pac_1', displayName: null, environment: 'SANDBOX' }, failure: null });
+  });
+
+  it('activates the new credential only after PaymentOS verifies it', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-old-111111', webhookSecret: 'whsec-old-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    const before = (await repo.getActiveConnection('tenant-a'))!;
+    const oldSealed = before.secretSealed;
+
+    const result = await rotateConnectionCredentials(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-new-222222', webhookSecret: 'whsec-new-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    assert.equal(result.outcome, 'rotated');
+    const after = (await repo.getActiveConnection('tenant-a'))!;
+    assert.equal(after.id, before.id, 'rotation keeps the same connection row (history intact)');
+    assert.notEqual(after.secretSealed, oldSealed);
+    assert.equal(openConnectionSecret(after.secretSealed!, getConnectionWrapKey(ENV)!), 'hapos-key-new-222222');
+    const audit = await repo.listConnectionEvents('tenant-a');
+    assert.ok(audit.some((e) => e.action === 'CREDENTIAL_ROTATED' && e.result === 'OK'));
+  });
+
+  it('rejects rotation for a DIFFERENT merchant (disconnect + connect instead)', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-old-111111', webhookSecret: 'whsec-old-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    const result = await rotateConnectionCredentials(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-b', apiKey: 'hapos-key-new-222222', webhookSecret: 'whsec-new-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    assert.equal(result.outcome, 'error');
+    const row = (await repo.getActiveConnection('tenant-a'))!;
+    assert.equal(openConnectionSecret(row.secretSealed!, getConnectionWrapKey(ENV)!), 'hapos-key-old-111111');
+  });
+
+  it('failed rotation keeps the OLD credential active (no cutover on rejection)', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-old-111111', webhookSecret: 'whsec-old-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    stubPaymentOSHealth({ connected: false, mpesaAccount: null, failure: 'unauthorized' });
+    const result = await rotateConnectionCredentials(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-bad-333333', webhookSecret: 'whsec-new-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    assert.equal(result.outcome, 'error');
+    const row = (await repo.getActiveConnection('tenant-a'))!;
+    assert.equal(row.status, 'CONNECTED');
+    assert.equal(openConnectionSecret(row.secretSealed!, getConnectionWrapKey(ENV)!), 'hapos-key-old-111111');
+    const audit = await repo.listConnectionEvents('tenant-a');
+    assert.ok(audit.some((e) => e.action === 'ROTATION_FAILED' && e.result === 'ERROR'));
+  });
+
+  it('submitting the already-active credential is a no-op, not a rotation', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-old-111111', webhookSecret: 'whsec-old-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    const result = await rotateConnectionCredentials(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-old-111111', webhookSecret: 'whsec-old-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    assert.equal(result.outcome, 'unchanged');
+  });
+
+  it('payments created before rotation keep their references (continuity)', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-old-111111', webhookSecret: 'whsec-old-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    const connection = (await repo.getActiveConnection('tenant-a'))!;
+    await repo.createPayment({
+      tenantId: 'tenant-a', provider: 'PAYMENTOS', method: 'MPESA', amount: 300, currencyCode: 'KES',
+      idempotencyKey: 'pay-rotation-1', attemptNumber: 1,
+      connection: { connectionId: connection.id, providerMerchantId: 'merchant-a' },
+    });
+    await rotateConnectionCredentials(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-new-222222', webhookSecret: 'whsec-new-1234567890abcd', environment: 'SANDBOX' },
+    }, ENV);
+    const payment = (await repo.getPaymentByIdempotency('tenant-a', 'pay-rotation-1'))!;
+    assert.equal(payment.connection?.connectionId, connection.id);
+    assert.equal(payment.connection?.providerMerchantId, 'merchant-a');
+  });
+});
+
+describe('connection audit trail', () => {
+  let repo: MemoryRepo;
+  beforeEach(() => {
+    repo = new MemoryRepo({ NODE_ENV: 'test' });
+    stubPaymentOSHealth({ connected: true, mpesaAccount: { id: 'pac_1', displayName: null, environment: 'SANDBOX' }, failure: null });
+  });
+
+  it('records action + actor + result for the full lifecycle, never secrets', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'admin-9',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-1234567890', webhookSecret: 'whsec-1234567890abcdef', environment: 'SANDBOX' },
+    }, ENV);
+    await verifyConnection(repo as unknown as CommerceRepository, { tenantId: 'tenant-a', actorId: 'admin-9' }, ENV);
+    await disconnectConnection(repo as unknown as CommerceRepository, { tenantId: 'tenant-a', actorId: 'admin-9' }, ENV);
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'admin-9',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-1234567890', webhookSecret: 'whsec-1234567890abcdef', environment: 'SANDBOX' },
+    }, ENV);
+
+    const events = await repo.listConnectionEvents('tenant-a');
+    const actions = events.map((e) => e.action);
+    for (const expected of ['CONNECTED', 'VERIFIED', 'DISCONNECTED', 'RECONNECTED']) {
+      assert.ok(actions.includes(expected as never), `missing audit action ${expected}`);
+    }
+    assert.ok(events.every((e) => e.actorId === 'admin-9'), 'actor recorded');
+    assert.ok(events.every((e) => e.tenantId === 'tenant-a'), 'tenant recorded');
+    const serialized = JSON.stringify(events);
+    assert.ok(!serialized.includes('hapos-key'), 'no api key in audit');
+    assert.ok(!serialized.includes('whsec-'), 'no webhook secret in audit');
+  });
+
+  it('cross-tenant connection attempt is audited as FOREIGN_MERCHANT_REJECTED', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-1234567890', webhookSecret: 'whsec-1234567890abcdef', environment: 'SANDBOX' },
+    }, ENV);
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-b', actorId: 'b',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-1234567890', webhookSecret: 'whsec-1234567890abcdef', environment: 'SANDBOX' },
+    }, ENV);
+    const eventsB = await repo.listConnectionEvents('tenant-b');
+    assert.ok(eventsB.some((e) => e.action === 'FOREIGN_MERCHANT_REJECTED' && e.result === 'ERROR'));
+  });
+
+  it('listConnectionsForAudit masks the provider reference and strips secrets', async () => {
+    await connectPaymentOS(repo as unknown as CommerceRepository, {
+      tenantId: 'tenant-a', actorId: 'a',
+      raw: { providerTenantId: 'merchant-a', apiKey: 'hapos-key-1234567890', webhookSecret: 'whsec-1234567890abcdef', environment: 'SANDBOX' },
+    }, ENV);
+    const auditRows = await listConnectionsForAudit(repo as unknown as CommerceRepository);
+    const row = auditRows.find((c) => c.tenantId === 'tenant-a')!;
+    assert.match(row.providerTenantId ?? '', /^\*\*\*\*[^*]+$/);
+    const serialized = JSON.stringify(auditRows);
+    // NOTE: MemoryRepo connection ids embed the merchant slug (conn-merchant-a-N);
+    // production ids are UUIDs, so we assert on the provider reference field.
+    assert.ok(!auditRows.some((c) => c.providerTenantId === 'merchant-a'), 'full merchant reference masked');
+    assert.ok(!serialized.includes('v1.'), 'no sealed material');
+    assert.ok(!serialized.includes('hapos-key'), 'no api key');
   });
 });

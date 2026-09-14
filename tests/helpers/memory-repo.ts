@@ -6,7 +6,7 @@
  */
 import { CommerceError } from '../../src/server/commerce/orders.ts';
 import { PaymentError } from '../../src/server/commerce/payments.ts';
-import type { OpsOrder, OpsPayment } from '../../src/server/commerce/repository.ts';
+import type { OpsOrder, OpsPayment, OpsPaymentConnectionEvent } from '../../src/server/commerce/repository.ts';
 import type { OpsPaymentConnection, PaymentConnectionMethod, PaymentConnectionStatus } from '../../src/server/payments/connection.ts';
 import type { GatewayHealthResult } from '../../src/server/payments/gateway.ts';
 
@@ -18,6 +18,7 @@ export class MemoryRepo {
   sales: Map<string, { id: string; orderId: string }> = new Map();
   orderCounter = 0;
   connections: Map<string, OpsPaymentConnection> = new Map();
+  connectionEvents: OpsPaymentConnectionEvent[] = [];
   /** Simulated PaymentOS health response (driven by tests via fetch stub). */
   healthResponse: GatewayHealthResult = { connected: true, mpesaAccount: null, failure: null };
   /** Set true to simulate the SQL one-active partial unique index. */
@@ -242,5 +243,42 @@ export class MemoryRepo {
     if (input.supportedMethods !== undefined) row.supportedMethods = [...input.supportedMethods] as never;
     row.updatedAt = new Date().toISOString();
     return row;
+  }
+
+  // ── connection audit events (Phase 4B closure) ──
+  async recordConnectionEvent(input: {
+    tenantId: string;
+    connectionId?: string | null;
+    action: OpsPaymentConnectionEvent['action'];
+    actorId?: string | null;
+    actorRole?: string | null;
+    result?: 'OK' | 'ERROR';
+    oldProviderReference?: string | null;
+    newProviderReference?: string | null;
+  }): Promise<OpsPaymentConnectionEvent> {
+    const event: OpsPaymentConnectionEvent = {
+      id: `evt-${this.connectionEvents.length + 1}`,
+      tenantId: input.tenantId,
+      connectionId: input.connectionId ?? null,
+      action: input.action,
+      actorId: input.actorId ?? null,
+      actorRole: input.actorRole ?? null,
+      result: input.result ?? 'OK',
+      oldProviderReference: input.oldProviderReference ?? null,
+      newProviderReference: input.newProviderReference ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    this.connectionEvents.push(event);
+    return event;
+  }
+  async listConnectionEvents(tenantId: string, filters: { connectionId?: string; limit?: number } = {}) {
+    return this.connectionEvents
+      .filter((event) => event.tenantId === tenantId)
+      .filter((event) => !filters.connectionId || event.connectionId === filters.connectionId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, filters.limit ?? 100);
+  }
+  async listAllConnectionsForAudit() {
+    return [...this.connections.values()];
   }
 }
