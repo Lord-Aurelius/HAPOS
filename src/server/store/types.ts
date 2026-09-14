@@ -468,6 +468,23 @@ export type StoreSaleAmendment = {
 };
 
 /**
+ * Phase 4B closure lifecycle audit row. Fixed vocabulary, no secret material
+ * by construction — only references and results are stored.
+ */
+export type StoreConnectionEvent = {
+  id: string;
+  tenantId: string;
+  connectionId?: string | null;
+  action: string;
+  actorId?: string | null;
+  actorRole?: string | null;
+  result: string;
+  oldProviderReference?: string | null;
+  newProviderReference?: string | null;
+  createdAt: string;
+};
+
+/**
  * Phase 4B payment connection (SQL-authoritative in postgres mode; file-mode
  * projection keeps local development and tests working). Sealed secret blobs
  * live only here and in SQL — mappers strip them at every read boundary.
@@ -560,4 +577,6 @@ export type StoreState = {
   payments: StorePayment[];
   // Phase 4B transitional projection (SQL-authoritative: phase-4b-payment-connections).
   paymentConnections: StorePaymentConnection[];
+  // Phase 4B closure audit trail (SQL-authoritative: phase-4b2-connection-events).
+  connectionEvents: StoreConnectionEvent[];
 };

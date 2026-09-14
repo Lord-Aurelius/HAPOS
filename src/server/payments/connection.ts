@@ -109,6 +109,46 @@ export function isMpesaAvailable(connection: Pick<PublicPaymentConnection, 'stat
   return connection.status === 'CONNECTED' && connection.supportedMethods.includes('MPESA');
 }
 
+// ── lifecycle audit trail (Phase 4B closure) ───────────────────────────────
+
+/** Fixed action vocabulary — mirrors phase-4b2-connection-events.sql. */
+export type PaymentConnectionEventAction =
+  | 'CONNECTED'
+  | 'VERIFIED'
+  | 'DISCONNECTED'
+  | 'RECONNECTED'
+  | 'CREDENTIAL_ROTATED'
+  | 'ROTATION_FAILED'
+  | 'ENVIRONMENT_REJECTED'
+  | 'FOREIGN_MERCHANT_REJECTED';
+
+export const CONNECTION_EVENT_ACTION_VALUES: readonly PaymentConnectionEventAction[] = [
+  'CONNECTED',
+  'VERIFIED',
+  'DISCONNECTED',
+  'RECONNECTED',
+  'CREDENTIAL_ROTATED',
+  'ROTATION_FAILED',
+  'ENVIRONMENT_REJECTED',
+  'FOREIGN_MERCHANT_REJECTED',
+];
+
+/** Non-secret lifecycle audit row (never carries credentials of any kind). */
+export type OpsPaymentConnectionEvent = {
+  id: string;
+  tenantId: string;
+  connectionId: string | null;
+  action: PaymentConnectionEventAction;
+  actorId: string | null;
+  actorRole: string | null;
+  result: 'OK' | 'ERROR';
+  /** Previous merchant reference where relevant (rotation/rejection). */
+  oldProviderReference: string | null;
+  /** New merchant reference where relevant (connect/rotation). */
+  newProviderReference: string | null;
+  createdAt: string;
+};
+
 // ── secret sealing (same trust class as QR_WRAP_KEY / JWT_SECRET) ──────────
 
 const SEALED_VERSION = 'v1';

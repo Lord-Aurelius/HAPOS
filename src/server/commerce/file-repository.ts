@@ -34,7 +34,9 @@ import { PaymentError, transitionPaymentStatus } from '@/server/commerce/payment
 import { PaymentConnectionError } from '@/server/payments/connection';
 import type {
   OpsPaymentConnection,
+  OpsPaymentConnectionEvent,
   PaymentConnectionEnvironment,
+  PaymentConnectionEventAction,
   PaymentConnectionMethod,
   PaymentConnectionProvider,
   PaymentConnectionStatus,
@@ -61,7 +63,7 @@ import type {
   TransitionPaymentInput,
 } from '@/server/commerce/repository';
 import { readStore, updateStore } from '@/server/store';
-import type { StorePaymentConnection, StoreState } from '@/server/store/types';
+import type { StoreConnectionEvent, StorePaymentConnection, StoreState } from '@/server/store/types';
 import { voidServiceRecord } from '@/server/store/service-records';
 import {
   orderFromStore,
@@ -83,6 +85,21 @@ function paymentRow(store: StoreState, tenantId: string, paymentId: string) {
     throw new PaymentError('unknown-payment', 'Payment not found for this shop.');
   }
   return payment;
+}
+
+function toOpsConnectionEvent(row: StoreConnectionEvent): OpsPaymentConnectionEvent {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    connectionId: row.connectionId ?? null,
+    action: row.action as OpsPaymentConnectionEvent['action'],
+    actorId: row.actorId ?? null,
+    actorRole: row.actorRole ?? null,
+    result: (row.result ?? 'OK') as OpsPaymentConnectionEvent['result'],
+    oldProviderReference: row.oldProviderReference ?? null,
+    newProviderReference: row.newProviderReference ?? null,
+    createdAt: row.createdAt,
+  };
 }
 
 function toOpsConnection(row: StorePaymentConnection): OpsPaymentConnection {
@@ -559,6 +576,55 @@ export class FileCommerceRepository implements CommerceRepository {
       row.updatedAt = now;
       return toOpsConnection(row);
     });
+  }
+
+  async recordConnectionEvent(
+    input: {
+      tenantId: string;
+      connectionId?: string | null;
+      action: PaymentConnectionEventAction;
+      actorId?: string | null;
+      actorRole?: string | null;
+      result?: 'OK' | 'ERROR';
+      oldProviderReference?: string | null;
+      newProviderReference?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    void ctx;
+    return updateStore((store) => {
+      const now = ctx.now ?? new Date().toISOString();
+      const row: StoreConnectionEvent = {
+        id: ctx.generateId ? ctx.generateId() : randomUUID(),
+        tenantId: input.tenantId,
+        connectionId: input.connectionId ?? null,
+        action: input.action as string,
+        actorId: input.actorId ?? null,
+        actorRole: input.actorRole ?? null,
+        result: (input.result ?? 'OK') as string,
+        oldProviderReference: input.oldProviderReference ?? null,
+        newProviderReference: input.newProviderReference ?? null,
+        createdAt: now,
+      };
+      store.connectionEvents ??= [];
+      store.connectionEvents.push(row);
+      return toOpsConnectionEvent(row);
+    });
+  }
+
+  async listConnectionEvents(tenantId: string, filters: { connectionId?: string; limit?: number } = {}) {
+    const store = await readStore();
+    return (store.connectionEvents ?? [])
+      .filter((item) => item.tenantId === tenantId)
+      .filter((item) => !filters.connectionId || item.connectionId === filters.connectionId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, filters.limit ?? 100)
+      .map(toOpsConnectionEvent);
+  }
+
+  async listAllConnectionsForAudit() {
+    const store = await readStore();
+    return (store.paymentConnections ?? []).map(toOpsConnection);
   }
 
   async amendSale(

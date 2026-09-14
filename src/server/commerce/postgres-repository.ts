@@ -47,7 +47,9 @@ import { SellerError, hashSellerBearer } from './seller.ts';
 import { PaymentConnectionError } from '../payments/connection.ts';
 import type {
   OpsPaymentConnection,
+  OpsPaymentConnectionEvent,
   PaymentConnectionEnvironment,
+  PaymentConnectionEventAction,
   PaymentConnectionMethod,
   PaymentConnectionProvider,
   PaymentConnectionStatus,
@@ -1706,6 +1708,65 @@ export class PostgresCommerceRepository implements CommerceRepository {
     }
     return mapConnectionRow(row);
   }
+
+  async recordConnectionEvent(
+    input: {
+      tenantId: string;
+      connectionId?: string | null;
+      action: PaymentConnectionEventAction;
+      actorId?: string | null;
+      actorRole?: string | null;
+      result?: 'OK' | 'ERROR';
+      oldProviderReference?: string | null;
+      newProviderReference?: string | null;
+    },
+    ctx: OpContext = {},
+  ) {
+    const now = nowISO(ctx);
+    const id = newId(ctx);
+    await this.pool.query(
+      `insert into payment_connection_events
+        (id, tenant_id, connection_id, action, actor_id, actor_role, result, old_provider_reference, new_provider_reference, created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        id, input.tenantId, input.connectionId ?? null, input.action,
+        input.actorId ?? null, input.actorRole ?? null, input.result ?? 'OK',
+        input.oldProviderReference ?? null, input.newProviderReference ?? null, now,
+      ],
+    );
+    return {
+      id,
+      tenantId: input.tenantId,
+      connectionId: input.connectionId ?? null,
+      action: input.action,
+      actorId: input.actorId ?? null,
+      actorRole: input.actorRole ?? null,
+      result: (input.result ?? 'OK') as 'OK' | 'ERROR',
+      oldProviderReference: input.oldProviderReference ?? null,
+      newProviderReference: input.newProviderReference ?? null,
+      createdAt: now,
+    } satisfies OpsPaymentConnectionEvent;
+  }
+
+  async listConnectionEvents(tenantId: string, filters: { connectionId?: string; limit?: number } = {}) {
+    const conditions = [`tenant_id = $1`];
+    const params: unknown[] = [tenantId];
+    if (filters.connectionId) {
+      conditions.push(`connection_id = $${params.length + 1}`);
+      params.push(filters.connectionId);
+    }
+    const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+    const { rows } = await this.pool.query(
+      `select * from payment_connection_events where ${conditions.join(' and ')} order by created_at desc limit ${limit}`,
+      params,
+    );
+    return rows.map((row) => mapConnectionEventRow(row as Record<string, unknown>));
+  }
+
+  async listAllConnectionsForAudit() {
+    const { rows } = await this.pool.query(`select * from payment_connections order by created_at desc`);
+    return rows.map((row) => mapConnectionRow(row as Record<string, unknown>));
+  }
 }
 
 // ── row mappers (snake_case → ops) ───────────────────────────────────────────
@@ -1846,6 +1907,21 @@ function mapPaymentRow(row: Record<string, unknown>): OpsPayment {
     createdBy: (row.created_by as string | null) ?? null,
     createdAt: toISO(row.created_at),
     updatedAt: toISO(row.updated_at),
+  };
+}
+
+function mapConnectionEventRow(row: Record<string, unknown>): OpsPaymentConnectionEvent {
+  return {
+    id: row.id as string,
+    tenantId: row.tenant_id as string,
+    connectionId: (row.connection_id as string | null) ?? null,
+    action: row.action as OpsPaymentConnectionEvent['action'],
+    actorId: (row.actor_id as string | null) ?? null,
+    actorRole: (row.actor_role as string | null) ?? null,
+    result: (row.result as 'OK' | 'ERROR') ?? 'OK',
+    oldProviderReference: (row.old_provider_reference as string | null) ?? null,
+    newProviderReference: (row.new_provider_reference as string | null) ?? null,
+    createdAt: toISO(row.created_at),
   };
 }
 

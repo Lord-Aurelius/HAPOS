@@ -179,7 +179,7 @@ describe('connection lifecycle (connect / verify / disconnect / reconnect)', () 
     }, ENV);
     stubPaymentOSHealth({ connected: false, mpesaAccount: null, failure: 'unauthorized' });
     const result = await verifyConnection(repo as unknown as CommerceRepository, { tenantId: 'tenant-a' }, ENV);
-    assert.equal(result.status, 'ERROR');
+    assert.equal(result.status, 'AUTHENTICATION_FAILED');
     assert.equal(result.code, 'CREDENTIALS_REJECTED');
     const stored = (await repo.listConnections('tenant-a'))[0];
     assert.equal(stored.status, 'ERROR');

@@ -37,7 +37,9 @@ import type { InventoryMovementType } from './inventory.ts';
 import type { PaymentMethod, PaymentProvider, PaymentStatus } from './payments.ts';
 import type {
   OpsPaymentConnection,
+  OpsPaymentConnectionEvent,
   PaymentConnectionEnvironment,
+  PaymentConnectionEventAction,
   PaymentConnectionMethod,
   PaymentConnectionProvider,
   PaymentConnectionStatus,
@@ -58,6 +60,9 @@ export type {
  * The snapshot keeps historical payments understandable even after the
  * connection is later disconnected or replaced.
  */
+export type { OpsPaymentConnectionEvent } from '@/server/payments/connection.ts';
+export type { PaymentConnectionEventAction } from '@/server/payments/connection.ts';
+
 export type OpsPaymentConnectionSnapshot = {
   connectionId: string;
   providerMerchantId: string | null;
@@ -334,4 +339,27 @@ export interface CommerceRepository {
     },
     ctx?: OpContext,
   ): Promise<OpsPaymentConnection>;
+
+  // ── connection lifecycle audit (Phase 4B closure) ──
+  // (event type re-exported below)
+  recordConnectionEvent(
+    input: {
+      tenantId: string;
+      connectionId?: string | null;
+      action: PaymentConnectionEventAction;
+      actorId?: string | null;
+      actorRole?: string | null;
+      result?: 'OK' | 'ERROR';
+      oldProviderReference?: string | null;
+      newProviderReference?: string | null;
+    },
+    ctx?: OpContext,
+  ): Promise<OpsPaymentConnectionEvent>;
+  /** Newest first. Tenant-scoped. */
+  listConnectionEvents(tenantId: string, filters?: { connectionId?: string; limit?: number }): Promise<OpsPaymentConnectionEvent[]>;
+  /**
+   * Platform support surface: every tenant's connections + latest event.
+   * Metadata only — the repository strips sealed material by construction.
+   */
+  listAllConnectionsForAudit(): Promise<OpsPaymentConnection[]>;
 }

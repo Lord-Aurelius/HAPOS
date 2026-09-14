@@ -483,5 +483,6 @@ export function createSeedStore(): StoreState {
     // Phase 4: payments start empty (SQL-authoritative later).
     payments: [],
     paymentConnections: [],
+    connectionEvents: [],
   };
 }
