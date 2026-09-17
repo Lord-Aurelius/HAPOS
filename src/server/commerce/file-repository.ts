@@ -45,6 +45,7 @@ import {
   touchSellerCredentialUsed,
   verifySellerCredential as verifySellerCredentialOp,
 } from '@/server/commerce/seller-store';
+import { projectCompletedSaleToLegacyRecord } from '@/server/commerce/legacy-projection';
 import type {
   CommerceRepository,
   CreatePaymentInput,
@@ -77,6 +78,38 @@ function asCommerceStore(store: StoreState): CommerceStore {
 
 function asSellerStore(store: StoreState): Parameters<typeof verifySellerCredentialOp>[0] {
   return store as unknown as Parameters<typeof verifySellerCredentialOp>[0];
+}
+
+/**
+ * Project a freshly committed engine sale into the legacy service_record
+ * read model (dashboard, reports, sales ledger all aggregate it). Runs inside
+ * the caller's mutator so sale, stock and statistics projection commit
+ * atomically. No-op when the sale is a duplicate or already projected.
+ */
+function projectFreshSaleToLegacy(
+  store: StoreState,
+  sale: { id: string; tenantId: string; orderId: string; customerId?: string | null; sellerId?: string | null; total: number; completedAt?: string | null },
+  actorId: string,
+  ctx: OpContext,
+): void {
+  const order = (store.orders ?? []).find((item) => item.id === sale.orderId && item.tenantId === sale.tenantId) ?? null;
+  const items = (store.saleItems ?? [])
+    .filter((item) => item.saleId === sale.id && item.tenantId === sale.tenantId)
+    .map((item) => ({
+      itemType: item.itemType,
+      productId: item.productId ?? null,
+      serviceId: item.serviceId ?? null,
+      quantity: item.quantity,
+      itemName: item.itemName,
+      itemSnapshot: (item.itemSnapshot ?? null) as Record<string, unknown> | null,
+    }));
+  projectCompletedSaleToLegacyRecord(store, {
+    sale,
+    orderNotes: order?.notes ?? null,
+    items,
+    actorId,
+    generateId: ctx.generateId,
+  });
 }
 
 function paymentRow(store: StoreState, tenantId: string, paymentId: string) {
@@ -235,16 +268,28 @@ export class FileCommerceRepository implements CommerceRepository {
     input: { tenantId: string; orderId: string; actorId: string; actorRole: 'shop_admin' | 'staff' | 'super_admin' | 'customer' | 'system' },
     ctx: OpContext = {},
   ) {
-    void ctx;
-    return updateStore((store) => approveOrderOp(asCommerceStore(store), input));
+    return updateStore((store) => {
+      const result = approveOrderOp(asCommerceStore(store), input);
+      // Same mutator: the legacy statistics projection commits with the sale.
+      if (!result.duplicate) {
+        projectFreshSaleToLegacy(store, result.sale, input.actorId, ctx);
+      }
+      return result;
+    });
   }
 
   async finalizeApprovedOrder(
     input: { tenantId: string; orderId: string; actorId: string },
     ctx: OpContext = {},
   ) {
-    void ctx;
-    return updateStore((store) => finalizeApprovedOrderOp(asCommerceStore(store), input));
+    return updateStore((store) => {
+      const result = finalizeApprovedOrderOp(asCommerceStore(store), input);
+      // Same mutator: the legacy statistics projection commits with the sale.
+      if (!result.duplicate) {
+        projectFreshSaleToLegacy(store, result.sale, input.actorId, ctx);
+      }
+      return result;
+    });
   }
 
   async rejectOrder(
@@ -843,6 +888,10 @@ export class FileCommerceRepository implements CommerceRepository {
           orderId: input.orderId,
           actorId: input.actorId,
         });
+        // Same mutator: the legacy statistics projection commits with the sale.
+        if (!finalized.duplicate) {
+          projectFreshSaleToLegacy(store, finalized.sale, input.actorId, ctx);
+        }
         payment.saleId = finalized.sale.id;
         payment.needsRecovery = false;
         payment.recoveryReason = null;
