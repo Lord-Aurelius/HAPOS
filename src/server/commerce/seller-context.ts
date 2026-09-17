@@ -7,12 +7,12 @@
  * `@/server/actions/seller` (async actions only). Importing this module from
  * Server Components and Server Actions is safe.
  *
- * Context: credential issuance/management still writes the JSON runtime store
- * (updateStore), while verification + orders were cut onto
- * getCommerceRepository() — SQL in postgres mode, where seller_credentials is
- * never written by the app. Until issuance migrates to the repository, resolve
- * against the primary adapter first and fall back to the file adapter so
- * previously printed QRs keep scanning. Fail-closed on revoked/expired.
+ * Context: credential issuance/management writes the JSON runtime store
+ * (updateStore). Verification + orders go through getCommerceRepository(),
+ * which is currently the file adapter in every runtime (see
+ * repository-select); the SQL branch below is a safety net that only engages
+ * if the SQL adapter is ever re-enabled, so previously printed QRs keep
+ * scanning either way. Fail-closed on revoked/expired.
  */
 
 import { SellerError } from '@/server/commerce/seller';
