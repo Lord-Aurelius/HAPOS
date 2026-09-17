@@ -18,6 +18,7 @@ import { PaymentError } from '@/server/commerce/payments';
 import { GatewayError } from '@/server/payments/gateway';
 import { recordCashPayment } from '@/server/payments/payment-service';
 import { getCommerceRepository } from '@/server/commerce/repository-select';
+import { recordAiEvent } from '@/server/aegis/events';
 import type { ActorRole } from '@/server/commerce/commerce-store';
 
 export type CommerceSession = {
@@ -206,7 +207,20 @@ export async function createAndSubmitOrder(
     sale = await requireSaleView(repo, session.tenantId, finalized.sale.id);
   }
 
-  return { order: await requireOrderView(repo, session.tenantId, created.order.id), sale, route: submitted.route, duplicate: false };
+  const completed = { order: await requireOrderView(repo, session.tenantId, created.order.id), sale, route: submitted.route, duplicate: false };
+  await emitOrderSubmitted(session.tenantId, session.userId, completed.order.id);
+  if (completed.sale) {
+    await emitOrderApproved(session.tenantId, session.userId, completed.order.id, completed.sale.id);
+  }
+  return completed;
+}
+
+async function emitOrderSubmitted(tenantId: string, actorId: string, orderId: string): Promise<void> {
+  await recordAiEvent({ tenantId, event: 'order.submitted', entityType: 'order', entityId: orderId, actorId });
+}
+
+async function emitOrderApproved(tenantId: string, actorId: string, orderId: string, saleId: string): Promise<void> {
+  await recordAiEvent({ tenantId, event: 'order.approved', entityType: 'order', entityId: orderId, actorId, summary: `Sale ${saleId} completed.` });
 }
 
 export async function submitCommerceOrder(
@@ -248,6 +262,7 @@ export async function approveCommerceOrder(
         actorId: session.userId,
       });
     }
+    await emitOrderApproved(session.tenantId, session.userId, orderId, result.sale.id);
   }
   return {
     order: await requireOrderView(repo, session.tenantId, orderId),

@@ -26,6 +26,7 @@ import { getCallbackBaseUrl, getPaymentGateway, initiateMpesaPayment, recordCash
 import { PaymentError } from '@/server/commerce/payments';
 import { GatewayError } from '@/server/payments/gateway';
 import { PaymentConnectionError } from '@/server/payments/connection';
+import { recordAiEvent } from '@/server/aegis/events';
 import { updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
 
@@ -314,6 +315,24 @@ export async function submitSellerQrOrderAction(formData: FormData) {
     }
 
     await repo.touchSellerCredentialUsed(context.tenantId, context.credentialId);
+
+    await recordAiEvent({
+      tenantId: context.tenantId,
+      event: 'order.submitted',
+      entityType: 'order',
+      entityId: created.order.id,
+      actorId: context.sellerId,
+    });
+    if (finalizedSaleId) {
+      await recordAiEvent({
+        tenantId: context.tenantId,
+        event: 'order.approved',
+        entityType: 'order',
+        entityId: created.order.id,
+        actorId: context.sellerId,
+        summary: `Sale ${finalizedSaleId} completed.`,
+      });
+    }
 
     revalidatePath(`/sell/${reference}`);
     const receipt = finalizedSaleId ? `&saleId=${finalizedSaleId}` : '';

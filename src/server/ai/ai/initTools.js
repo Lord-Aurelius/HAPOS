@@ -6,7 +6,6 @@ const { createServiceRevenueBreakdownTool } = require("./tools/serviceRevenueBre
 const { createRevenueByEmployeeTool } = require("./tools/revenueByEmployeeTool");
 const { createRevenueByServiceTool } = require("./tools/revenueByServiceTool");
 const { createRevenueByPaymentMethodTool } = require("./tools/revenueByPaymentMethodTool");
-const { createRevenueByBranchTool } = require("./tools/revenueByBranchTool");
 const { createExpenseAnalysisTool } = require("./tools/expenseAnalysisTool");
 const { createUnusualExpensesTool } = require("./tools/unusualExpensesTool");
 const { createProfitAnalysisTool } = require("./tools/profitAnalysisTool");
@@ -17,7 +16,6 @@ const { createCustomerActivityTool } = require("./tools/customerActivityTool");
 const { createServiceIntelligenceTool } = require("./tools/serviceIntelligenceTool");
 const { createServiceProfitabilityTool } = require("./tools/serviceProfitabilityTool");
 const { createSalesSummaryTool } = require("./tools/salesSummaryTool");
-const { createInvoiceStatusTool } = require("./tools/invoiceStatusTool");
 const { createRevenueForecastTool } = require("./tools/revenueForecastTool");
 const { createExpenseForecastTool } = require("./tools/expenseForecastTool");
 const { createDemandForecastTool } = require("./tools/demandForecastTool");
@@ -27,7 +25,6 @@ const { createOpportunityDetectionTool } = require("./tools/opportunityDetection
 const { createStaffPerformanceTool } = require("./tools/staffPerformanceTool");
 const { createBusinessHealthScoreTool } = require("./tools/businessHealthScoreTool");
 const { createExecutiveSummaryTool } = require("./tools/executiveSummaryTool");
-const { createBranchPerformanceTool } = require("./tools/branchPerformanceTool");
 const { createSearchBusinessDataTool } = require("./tools/searchBusinessDataTool");
 const { createDashboardDataTool } = require("./tools/dashboardDataTool");
 
@@ -50,7 +47,6 @@ function initTools() {
   safeRegister("revenueByEmployee", () => createRevenueByEmployeeTool(biRepo));
   safeRegister("revenueByService", () => createRevenueByServiceTool(biRepo));
   safeRegister("revenueByPaymentMethod", () => createRevenueByPaymentMethodTool(biRepo));
-  safeRegister("revenueByBranch", () => createRevenueByBranchTool(biRepo));
   safeRegister("expenseAnalysis", () => createExpenseAnalysisTool(biRepo));
   safeRegister("unusualExpenses", () => createUnusualExpensesTool(biRepo));
   safeRegister("profitAnalysis", () => createProfitAnalysisTool(biRepo));
@@ -61,7 +57,6 @@ function initTools() {
   safeRegister("serviceIntelligence", () => createServiceIntelligenceTool(biRepo));
   safeRegister("serviceProfitability", () => createServiceProfitabilityTool(biRepo));
   safeRegister("salesSummary", () => createSalesSummaryTool(biRepo));
-  safeRegister("invoiceStatus", () => createInvoiceStatusTool(biRepo));
   safeRegister("revenueForecast", () => createRevenueForecastTool(biRepo));
   safeRegister("expenseForecast", () => createExpenseForecastTool(biRepo));
   safeRegister("demandForecast", () => createDemandForecastTool(biRepo));
@@ -71,7 +66,6 @@ function initTools() {
   safeRegister("staffPerformance", () => createStaffPerformanceTool(biRepo));
   safeRegister("businessHealthScore", () => createBusinessHealthScoreTool(biRepo));
   safeRegister("executiveSummary", () => createExecutiveSummaryTool(biRepo));
-  safeRegister("branchPerformance", () => createBranchPerformanceTool(biRepo));
   safeRegister("searchBusinessData", () => createSearchBusinessDataTool(biRepo));
   safeRegister("dashboardData", () => createDashboardDataTool(biRepo));
 

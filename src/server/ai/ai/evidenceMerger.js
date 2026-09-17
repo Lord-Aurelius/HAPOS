@@ -47,17 +47,12 @@ function mergeToolResults(toolResults) {
     opportunities: [],
     cashFlow: {},
     staff: [],
-    branches: [],
     forecasts: {},
     healthScore: null,
     executiveSummary: null,
-    invoices: {},
     revenueByEmployee: [],
     revenueByService: [],
     revenueByPaymentMethod: [],
-    revenueByBranch: [],
-    suppliers: {},
-    tax: {},
     reportingMetadata: null,
     missing: [],
     errors: [],
@@ -91,11 +86,7 @@ function mergeToolResults(toolResults) {
           break;
 
         case "revenueByPaymentMethod":
-          evidence.revenueByPaymentMethod = extractArray(data, "paymentMethods");
-          break;
-
-        case "revenueByBranch":
-          evidence.revenueByBranch = extractArray(data, "branches");
+          evidence.revenueByPaymentMethod = extractArray(data, "items");
           break;
 
         case "serviceRevenueBreakdown":
@@ -104,10 +95,6 @@ function mergeToolResults(toolResults) {
 
         case "profitMarginBreakdown":
           evidence.profitMarginBreakdown = extractArray(data, "items");
-          break;
-
-        case "branchPerformance":
-          evidence.branches = extractArray(data, "branches");
           break;
 
         case "expenseAnalysis":
@@ -144,10 +131,6 @@ function mergeToolResults(toolResults) {
 
         case "salesSummary":
           evidence.sales = { ...evidence.sales, ...data };
-          break;
-
-        case "invoiceStatus":
-          evidence.invoiceStatus = data;
           break;
 
         case "searchBusinessData":
@@ -192,10 +175,6 @@ function mergeToolResults(toolResults) {
 
         case "demandForecast":
           evidence.forecasts = { ...evidence.forecasts, demand: data };
-          break;
-
-        case "taxSummary":
-          evidence.tax = { ...evidence.tax, ...data };
           break;
       }
     } catch (e) {

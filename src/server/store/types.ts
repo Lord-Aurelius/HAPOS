@@ -192,6 +192,11 @@ export type StoreExpense = {
   expenseDate: string;
   createdBy: string;
   createdAt: string;
+  /**
+   * AEGIS/API idempotency key. Unique per tenant when present; absent for
+   * UI-created rows. Checked before insert so retried API writes converge.
+   */
+  idempotencyKey?: string | null;
 };
 
 export type StoreSubscription = {
@@ -281,6 +286,11 @@ export type StoreMarketplaceAd = {
   approvedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * AEGIS/API idempotency key. Unique per tenant when present; absent for
+   * UI-created rows. Checked before insert so retried API writes converge.
+   */
+  idempotencyKey?: string | null;
 };
 
 export type StoreCustomerOrder = {
@@ -579,4 +589,49 @@ export type StoreState = {
   paymentConnections: StorePaymentConnection[];
   // Phase 4B closure audit trail (SQL-authoritative: phase-4b2-connection-events).
   connectionEvents: StoreConnectionEvent[];
+  // AEGIS API-key connections. Secrets are never persisted — rows carry the
+  // sha256 hash plus a plaintext prefix for lookup. Master-scope rows are
+  // platform authority and must never surface in normal key listings.
+  apiKeys: StoreApiKey[];
+  // AEGIS event log. Append-only, capped ring buffer: every HAPOS state
+  // transition worth transmitting carries tenant/shop/entity identity here.
+  aiEvents: StoreAiEvent[];
+};
+
+/** Authentication credential for AEGIS/programmatic API access. */
+export type ApiKeyScope = 'normal' | 'master';
+
+export type StoreApiKey = {
+  id: string;
+  /** Null for master-scope keys (platform authority, no tenant binding). */
+  tenantId: string | null;
+  /** Null for master-scope keys. */
+  userId: string | null;
+  name: string;
+  /** sha256 hex of the secret. The secret itself is shown once at creation. */
+  keyHash: string;
+  /** Plaintext lookup prefix (first characters of the secret). */
+  keyPrefix: string;
+  scope: ApiKeyScope;
+  status: 'ACTIVE' | 'REVOKED';
+  createdBy: string | null;
+  createdAt: string;
+  expiresAt?: string | null;
+  revokedAt?: string | null;
+  lastUsedAt?: string | null;
+};
+
+/** Persisted HAPOS state-transition event for AEGIS consumption. */
+export type StoreAiEvent = {
+  id: string;
+  tenantId: string;
+  /** Canonical shop identity (equals tenantId while shops map 1:1 to tenants). */
+  shopId: string;
+  event: string;
+  version: 1;
+  entityType?: string | null;
+  entityId?: string | null;
+  occurredAt: string;
+  actorId?: string | null;
+  summary?: string | null;
 };

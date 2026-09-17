@@ -50,6 +50,7 @@ import { CommerceError } from '@/server/commerce/orders';
 import { assertValidEmployeeNumber, normalizeEmployeeNumber } from '@/server/commerce/attendance';
 import { calculateCommission } from '@/server/services/app-data';
 import { dispatchSmsLogs } from '@/server/services/sms';
+import { recordAiEvent } from '@/server/aegis/events';
 import { voidServiceRecord } from '@/server/store/service-records';
 import { authenticateCustomer, authenticateUser, readStore, updateStore } from '@/server/store';
 import type { CommerceStore } from '@/server/commerce/commerce-store';
@@ -1463,9 +1464,10 @@ export async function addExpenseAction(formData: FormData) {
     throw error;
   }
 
+  const expenseId = randomUUID();
   await updateStore((store) => {
     store.expenses.push({
-      id: randomUUID(),
+      id: expenseId,
       tenantId: session.tenant!.id,
       category,
       description: formString(formData, 'description'),
@@ -1474,6 +1476,15 @@ export async function addExpenseAction(formData: FormData) {
       createdBy: session.user.id,
       createdAt: new Date().toISOString(),
     });
+  });
+
+  await recordAiEvent({
+    tenantId: session.tenant!.id,
+    event: 'expense.created',
+    entityType: 'expense',
+    entityId: expenseId,
+    actorId: session.user.id,
+    summary: `Expense ${category} recorded.`,
   });
 
   touchShopPaths();
@@ -1554,6 +1565,15 @@ export async function addMarketplaceAdAction(formData: FormData) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+  });
+
+  await recordAiEvent({
+    tenantId: session.tenant!.id,
+    event: 'marketplace.advert.created',
+    entityType: 'marketplace_advert',
+    entityId: adId,
+    actorId: session.user.id,
+    summary: 'Marketplace advert submitted for review.',
   });
 
   touchShopPaths();

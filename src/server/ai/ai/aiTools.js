@@ -10,7 +10,7 @@ const AI_TOOL_CATALOG = Object.freeze([
     type: "read",
     risk: "low",
     description:
-      "Summarise daily, weekly, or monthly revenue. Supports date range, period grouping, and branch filtering.",
+      "Summarise daily, weekly, or monthly revenue. Supports date range and period grouping.",
   },
   {
     id: "revenueTrends",
@@ -26,7 +26,7 @@ const AI_TOOL_CATALOG = Object.freeze([
     type: "read",
     risk: "low",
     description:
-      "Break down revenue by service, staff, or branch for a given period.",
+      "Break down revenue by service or staff for a given period.",
   },
   {
     id: "revenueByEmployee",
@@ -47,14 +47,7 @@ const AI_TOOL_CATALOG = Object.freeze([
     category: "Revenue",
     type: "read",
     risk: "low",
-    description: "Break down revenue by payment method (cash, card, mobile money, etc.).",
-  },
-  {
-    id: "revenueByBranch",
-    category: "Revenue",
-    type: "read",
-    risk: "low",
-    description: "Break down revenue by branch location.",
+    description: "Break down recorded payments by payment method (cash, mobile money, etc.) with status.",
   },
 
   // ── Expenses ─────────────────────────────────────────────────────────
@@ -92,7 +85,7 @@ const AI_TOOL_CATALOG = Object.freeze([
     type: "read",
     risk: "low",
     description:
-      "Break down profit margins by service, branch, or staff member.",
+      "Break down profit margins by service.",
   },
 
   // ── Customers ────────────────────────────────────────────────────────
@@ -151,15 +144,6 @@ const AI_TOOL_CATALOG = Object.freeze([
     description:
       "Summarise sales volume, transaction counts, average ticket size, and payment method breakdown.",
   },
-  {
-    id: "invoiceStatus",
-    category: "Sales",
-    type: "read",
-    risk: "medium",
-    description:
-      "Analyse invoice status distribution: paid, unpaid, overdue, cancelled.",
-  },
-
   // ── Forecasting ──────────────────────────────────────────────────────
 
   {
@@ -244,17 +228,6 @@ const AI_TOOL_CATALOG = Object.freeze([
       "Generate a comprehensive executive summary of business performance with key metrics and recommendations.",
   },
 
-  // ── Branches ─────────────────────────────────────────────────────────
-
-  {
-    id: "branchPerformance",
-    category: "Branches",
-    type: "read",
-    risk: "low",
-    description:
-      "Analyse performance by branch: revenue, expenses, profit, and customer counts.",
-  },
-
   // ── Search ───────────────────────────────────────────────────────────
 
   {
@@ -276,28 +249,6 @@ const AI_TOOL_CATALOG = Object.freeze([
     description:
       "Provide all data required by the HAPOS dashboard: revenue, profit, expenses, health score, risks, opportunities, forecasts, and KPIs.",
   },
-
-  // ── Supplier / Inventory (future-ready) ──────────────────────────────
-
-  {
-    id: "supplierInsights",
-    category: "Suppliers",
-    type: "read",
-    risk: "low",
-    description:
-      "Analyse supplier spending, payment patterns, and supplier performance.",
-  },
-
-  // ── Tax & Compliance ─────────────────────────────────────────────────
-
-  {
-    id: "taxSummary",
-    category: "Tax",
-    type: "read",
-    risk: "medium",
-    description:
-      "Summarise tax collected, tax liabilities, and tax period comparisons.",
-  },
 ]);
 
 const ROLES = Object.freeze(["super_admin", "shop_admin", "staff"]);
@@ -311,7 +262,6 @@ const ROLE_TOOLS = Object.freeze({
     "revenueByEmployee",
     "revenueByService",
     "revenueByPaymentMethod",
-    "revenueByBranch",
     "expenseAnalysis",
     "unusualExpenses",
     "profitAnalysis",
@@ -322,7 +272,6 @@ const ROLE_TOOLS = Object.freeze({
     "serviceIntelligence",
     "serviceProfitability",
     "salesSummary",
-    "invoiceStatus",
     "revenueForecast",
     "expenseForecast",
     "demandForecast",
@@ -332,11 +281,8 @@ const ROLE_TOOLS = Object.freeze({
     "staffPerformance",
     "businessHealthScore",
     "executiveSummary",
-    "branchPerformance",
     "searchBusinessData",
     "dashboardData",
-    "supplierInsights",
-    "taxSummary",
   ]),
 
   shop_admin: Object.freeze([
@@ -346,7 +292,6 @@ const ROLE_TOOLS = Object.freeze({
     "revenueByEmployee",
     "revenueByService",
     "revenueByPaymentMethod",
-    "revenueByBranch",
     "expenseAnalysis",
     "unusualExpenses",
     "profitAnalysis",
@@ -357,7 +302,6 @@ const ROLE_TOOLS = Object.freeze({
     "serviceIntelligence",
     "serviceProfitability",
     "salesSummary",
-    "invoiceStatus",
     "revenueForecast",
     "expenseForecast",
     "demandForecast",
@@ -367,11 +311,8 @@ const ROLE_TOOLS = Object.freeze({
     "staffPerformance",
     "businessHealthScore",
     "executiveSummary",
-    "branchPerformance",
     "searchBusinessData",
     "dashboardData",
-    "supplierInsights",
-    "taxSummary",
   ]),
 
   staff: Object.freeze([

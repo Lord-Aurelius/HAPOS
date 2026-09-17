@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   try {
     const [
       revenueResult, expenseResult, profitResult, customerResult,
-      healthResult, riskResult, oppResult, forecastResult, branchResult
+      healthResult, riskResult, oppResult, forecastResult, paymentResult
     ] = await Promise.all([
       runTool('revenueSummary', context, { period }),
       runTool('expenseAnalysis', context, { period }),
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       runTool('riskDetection', context, { period }),
       runTool('opportunityDetection', context, { period }),
       runTool('revenueForecast', context, { period: 'next_month' }),
-      runTool('branchPerformance', context, { period }),
+      runTool('revenueByPaymentMethod', context, { period }),
     ]);
 
     return NextResponse.json({
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       risks: riskResult?.data || riskResult,
       opportunities: oppResult?.data || oppResult,
       forecast: forecastResult?.data || forecastResult,
-      branches: branchResult?.data || branchResult,
+      payments: paymentResult?.data || paymentResult,
       generatedAt: new Date().toISOString(),
     });
   } catch (error: any) {

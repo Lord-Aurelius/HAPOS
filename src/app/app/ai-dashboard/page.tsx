@@ -6,7 +6,7 @@ import { TrendingUp, DollarSign, CreditCard, Users, Activity, AlertTriangle, Lig
 type DashboardData = {
   status: string; period: string; generatedAt: string;
   revenue: any; expenses: any; profitability: any; customers: any;
-  healthScore: any; risks: any; opportunities: any; forecast: any; branches: any;
+  healthScore: any; risks: any; opportunities: any; forecast: any; payments: any;
 };
 
 function formatCurrency(v: number | string | undefined | null): string {
@@ -73,7 +73,7 @@ export default function AiDashboardPage() {
   const risks = data?.risks?.risks || data?.risks || [];
   const opps = data?.opportunities?.opportunities || data?.opportunities || [];
   const fc = data?.forecast;
-  const branches = data?.branches?.branches || [];
+  const paymentMethods = data?.payments?.items || [];
 
   return (
     <>
@@ -161,22 +161,21 @@ export default function AiDashboardPage() {
         </div>
 
         <div className="panel">
-          <div className="panel-header"><h3><Building2 size={14} style={{ marginRight: 6, display: 'inline' }} />Branch performance</h3></div>
-          {loading ? <p className="muted">Loading...</p> : branches.length > 0 ? (
+          <div className="panel-header"><h3><Building2 size={14} style={{ marginRight: 6, display: 'inline' }} />Payments by method</h3></div>
+          {loading ? <p className="muted">Loading...</p> : paymentMethods.length > 0 ? (
             <table className="table">
-              <thead><tr><th>Branch</th><th style={{ textAlign: 'right' }}>Revenue</th><th style={{ textAlign: 'right' }}>Expenses</th><th style={{ textAlign: 'right' }}>Profit</th></tr></thead>
+              <thead><tr><th>Method</th><th style={{ textAlign: 'right' }}>Amount</th><th style={{ textAlign: 'right' }}>Transactions</th></tr></thead>
               <tbody>
-                {branches.map((b: any, i: number) => (
+                {paymentMethods.map((b: any, i: number) => (
                   <tr key={i}>
-                    <td>{b.branchName || 'Main'}</td>
-                    <td style={{ textAlign: 'right' }}>{formatCurrency(b.revenue)}</td>
-                    <td style={{ textAlign: 'right' }}>{formatCurrency(b.expenses)}</td>
-                    <td style={{ textAlign: 'right', color: safeNum(b.profit) >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatCurrency(b.profit)}</td>
+                    <td>{b.name || 'Unknown'}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(b.amount)}</td>
+                    <td style={{ textAlign: 'right' }}>{b.transactions || 0}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          ) : <p className="muted" style={{ fontSize: '0.8rem' }}>No branch data available.</p>}
+          ) : <p className="muted" style={{ fontSize: '0.8rem' }}>No payment data available.</p>}
         </div>
       </div>
     </>

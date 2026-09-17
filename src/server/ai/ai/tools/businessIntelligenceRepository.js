@@ -166,6 +166,8 @@ async function getRevenueSummary({ tenantId, period, groupBy }) {
   const ctx = authCtx(tenantId);
   const gb = groupBy || "total";
 
+  if (gb === "payment_method") return getRevenueByPaymentMethod({ tenantId, period });
+
   if (gb === "total" || gb === "overall") {
     const rows = await queryServiceRecords(tenantId, period);
     const row = rows[0] || {};
@@ -207,7 +209,6 @@ async function getRevenueSummary({ tenantId, period, groupBy }) {
   const groupMap = {
     service: { field: "serviceName", label: "service_name", id: "serviceName" },
     employee: { field: "staffId", label: "employee_name", nameSrc: "staffName", id: "staffId" },
-    branch: { field: "branchId", label: "branch_name", nameSrc: "branchName", id: "branchId" },
     customer: { field: "customerId", label: "customer_name", nameSrc: "customerName", id: "customerId" },
     payment_method: { field: "paymentMethod", label: "payment_method", id: "paymentMethod" },
     staff: { field: "staffId", label: "staff_name", nameSrc: "staffName", id: "staffId" },
@@ -325,17 +326,40 @@ async function getRevenueByEmployee({ tenantId, period }) {
 }
 
 async function getRevenueByPaymentMethod({ tenantId, period }) {
-  return getRevenueSummary({ tenantId, period, groupBy: "payment_method" });
-}
-
-async function getRevenueByBranch({ tenantId, period }) {
-  return getRevenueSummary({ tenantId, period, groupBy: "branch" });
+  const ctx = authCtx(tenantId);
+  let sql = `
+    SELECT COALESCE(state->>'method', 'Unknown') AS payment_method,
+      COALESCE(state->>'status', 'Unknown') AS status,
+      COUNT(*)::int AS transactions,
+      COALESCE(SUM((state->>'amount')::numeric), 0) AS amount
+    FROM app.runtime_state,
+    jsonb_array_elements(state->'payments') AS state
+    WHERE state->>'tenantId' = $1
+  `;
+  const params = [tenantId];
+  const pf = buildPeriodFilter(sql, params, period, "createdAt");
+  sql = pf.sql;
+  sql += ` GROUP BY payment_method, status ORDER BY amount DESC`;
+  const rows = await queryRows(ctx, sql, pf.params);
+  const byMethod = {};
+  for (const r of rows) {
+    const name = r.payment_method || "Unknown";
+    if (!byMethod[name]) byMethod[name] = { name, amount: 0, transactions: 0, byStatus: {} };
+    byMethod[name].amount += safeNum(r.amount);
+    byMethod[name].transactions += safeNum(r.transactions);
+    byMethod[name].byStatus[r.status || "Unknown"] = {
+      transactions: safeNum(r.transactions),
+      amount: safeNum(r.amount),
+    };
+  }
+  const items = Object.values(byMethod).sort((a, b) => b.amount - a.amount);
+  const total = items.reduce((s, item) => s + item.amount, 0);
+  return { period, total, items };
 }
 
 async function getServiceRevenueBreakdown({ tenantId, period, groupBy }) {
   const gb = groupBy || "service";
   if (gb === "staff") return getRevenueByEmployee({ tenantId, period });
-  if (gb === "branch") return getRevenueByBranch({ tenantId, period });
   return getRevenueByService({ tenantId, period });
 }
 
@@ -943,134 +967,8 @@ async function getProfitMarginBreakdown({ tenantId, period, groupBy }) {
       };
     });
     result.totalRevenue = totalRev;
-  } else if (gb === "branch") {
-    const revData = await getRevenueByBranch({ tenantId, period });
-    const expData = await getExpenseAnalysis({ tenantId, period });
-    const expMap = {};
-    for (const cat of expData.byCategory || []) {
-      expMap[cat.category] = safeNum(cat.total);
-    }
-    result.items = (revData.items || []).map(sr => {
-      const rev = safeNum(sr.revenue);
-      const cost = Object.values(expMap).reduce((s, v) => s + v, 0) / Math.max(1, revData.items.length);
-      const profit = rev - cost;
-      return {
-        name: sr.name,
-        revenue: rev,
-        cost: Math.round(cost * 100) / 100,
-        profit: Math.round(profit * 100) / 100,
-        margin: rev > 0 ? Math.round((profit / rev) * 10000) / 10000 : 0,
-      };
-    });
   }
   return result;
-}
-
-async function getBranchPerformance({ tenantId, period }) {
-  const ctx = authCtx(tenantId);
-
-  let revSql = `
-    SELECT
-      COALESCE(state->>'branchId', 'main') AS branch_id,
-      COALESCE(state->>'branchName', 'Main Branch') AS branch_name,
-      COUNT(DISTINCT state->>'customerId') AS customer_count,
-      COUNT(*)::int AS transaction_count,
-      COALESCE(SUM((state->>'price')::numeric), 0) AS revenue
-    FROM app.runtime_state,
-    jsonb_array_elements(state->'serviceRecords') AS state
-    WHERE state->>'tenantId' = $1 AND state->>'voidedAt' IS NULL
-  `;
-  let revParams = [tenantId];
-  const revPf = buildPeriodFilter(revSql, revParams, period);
-  revSql = revPf.sql;
-  revSql += ` GROUP BY state->>'branchId', state->>'branchName' ORDER BY revenue DESC`;
-  const revRows = await queryRows(ctx, revSql, revPf.params);
-
-  let expSql = `
-    SELECT
-      COALESCE(state->>'branchId', 'main') AS branch_id,
-      COALESCE(SUM((state->>'amount')::numeric), 0) AS expenses
-    FROM app.runtime_state,
-    jsonb_array_elements(state->'expenses') AS state
-    WHERE state->>'tenantId' = $1
-  `;
-  let expParams = [tenantId];
-  const expPf = buildExpensePeriodFilter(expSql, expParams, period);
-  expSql = expPf.sql;
-  expSql += ` GROUP BY state->>'branchId'`;
-  const expRows = await queryRows(ctx, expSql, expPf.params);
-  const expMap = {};
-  for (const e of expRows) expMap[e.branch_id] = safeNum(e.expenses);
-
-  if (revRows.length === 0) {
-    return { period, branches: [], message: "No branch data for this period." };
-  }
-
-  const branches = revRows.map(r => {
-    const branchExpenses = expMap[r.branch_id] || 0;
-    const branchRevenue = safeNum(r.revenue);
-    const profit = branchRevenue - branchExpenses;
-    return {
-      branchId: r.branch_id,
-      branchName: r.branch_name,
-      customerCount: safeNum(r.customer_count),
-      transactionCount: safeNum(r.transaction_count),
-      revenue: branchRevenue,
-      expenses: branchExpenses,
-      profit,
-      margin: branchRevenue > 0 ? profit / branchRevenue : 0,
-    };
-  });
-
-  const ranked = [...branches].sort((a, b) => b.revenue - a.revenue);
-  const topBranch = ranked[0] || null;
-  const mostProfitable = [...branches].sort((a, b) => b.profit - a.profit)[0] || null;
-  const topVsSecond = ranked.length > 1 ? {
-    topName: ranked[0].branchName, topRevenue: ranked[0].revenue,
-    secondName: ranked[1].branchName, secondRevenue: ranked[1].revenue,
-    difference: ranked[0].revenue - ranked[1].revenue,
-  } : null;
-
-  const prevPeriod = previousPeriod(period);
-  let prevRevData = null;
-  if (prevPeriod) {
-    prevRevData = await getBranchPerformance({ tenantId, period: prevPeriod });
-  }
-
-  branches.forEach((b, i) => {
-    b.rank = i + 1;
-    if (prevRevData && prevRevData.branches) {
-      const prev = prevRevData.branches.find(p => p.branchId === b.branchId);
-      if (prev && prev.revenue > 0) {
-        b.growth = Math.round(((b.revenue - prev.revenue) / prev.revenue) * 10000) / 100;
-      } else {
-        b.growth = null;
-      }
-    }
-  });
-
-  return {
-    period,
-    branches,
-    topBranch: topBranch ? { name: topBranch.branchName, revenue: topBranch.revenue, profit: topBranch.profit } : null,
-    mostProfitableBranch: mostProfitable ? { name: mostProfitable.branchName, profit: mostProfitable.profit, margin: Math.round(mostProfitable.margin * 10000) / 10000 } : null,
-    topVsSecond,
-    ranking: branches.map(b => ({ rank: b.rank, name: b.branchName, revenue: b.revenue, profit: b.profit, growth: b.growth })),
-  };
-}
-
-async function getProfitByBranch({ tenantId, period }) {
-  const data = await getBranchPerformance({ tenantId, period });
-  return {
-    period,
-    branches: data.branches.map(b => ({
-      name: b.branchName,
-      revenue: b.revenue,
-      expenses: b.expenses,
-      profit: b.profit,
-      margin: b.margin,
-    })),
-  };
 }
 
 async function getDetectedRisks({ tenantId, period }) {
@@ -1458,45 +1356,6 @@ async function searchBusinessData({ tenantId, query, type }) {
   return results;
 }
 
-async function getInvoiceStatus({ tenantId, period, status }) {
-  const ctx = authCtx(tenantId);
-  let sql = `
-    SELECT
-      state->>'invoiceId' AS invoice_id,
-      COALESCE(state->>'paymentStatus', 'unpaid') AS payment_status,
-      COALESCE(state->>'customerName', state->>'customerId', 'Unknown') AS customer_name,
-      COALESCE((state->>'price')::numeric, 0) AS amount,
-      state->>'performedAt' AS date
-    FROM app.runtime_state,
-    jsonb_array_elements(state->'serviceRecords') AS state
-    WHERE state->>'tenantId' = $1 AND state->>'voidedAt' IS NULL
-  `;
-  const params = [tenantId];
-  const pf = buildPeriodFilter(sql, params, period);
-  sql = pf.sql;
-  if (status) {
-    sql += ` AND LOWER(state->>'paymentStatus') = LOWER($${params.length + 1})`;
-    params.push(status);
-  }
-  const rows = await queryRows(ctx, sql, pf.params);
-  const paid = rows.filter(r => {
-    const ps = (r.payment_status || "").toLowerCase();
-    return ps === "paid" || ps === "completed";
-  });
-  const unpaid = rows.filter(r => {
-    const ps = (r.payment_status || "").toLowerCase();
-    return ps !== "paid" && ps !== "completed";
-  });
-  const totalAmount = rows.reduce((s, r) => s + safeNum(r.amount), 0);
-
-  return {
-    period, total: rows.length, paidCount: paid.length, unpaidCount: unpaid.length,
-    paidAmount: paid.reduce((s, r) => s + safeNum(r.amount), 0),
-    unpaidAmount: unpaid.reduce((s, r) => s + safeNum(r.amount), 0),
-    totalAmount, invoices: rows.slice(0, 50),
-  };
-}
-
 async function getRevenueForecast({ tenantId, period }) {
   const ctx = authCtx(tenantId);
   const targetPeriods = { next_month: 30, next_quarter: 90, next_year: 365 };
@@ -1589,7 +1448,7 @@ async function getDemandForecast({ tenantId, period, serviceId }) {
       AND state->>'performedAt' >= $2
   `;
   const params = [tenantId, new Date(Date.now() - 90 * 86400000).toISOString()];
-  if (serviceId) { sql += ` AND state->>'serviceName' = $3`; params.push(serviceId); }
+  if (serviceId) { sql += ` AND (state->>'serviceId' = $3 OR state->>'serviceName' = $3)`; params.push(serviceId); }
   sql += ` GROUP BY state->>'serviceName' ORDER BY count DESC`;
 
   const history = await queryRows(ctx, sql, params);
@@ -1614,7 +1473,7 @@ async function getDemandForecast({ tenantId, period, serviceId }) {
 async function getDashboardData({ tenantId, period }) {
   const [
     revenueData, expenseData, profitData, customerData, healthData,
-    riskData, oppData, forecastData, branchData,
+    riskData, oppData, forecastData, paymentData,
   ] = await Promise.all([
     getRevenueSummary({ tenantId, period }),
     getExpenseAnalysis({ tenantId, period }),
@@ -1624,7 +1483,7 @@ async function getDashboardData({ tenantId, period }) {
     getDetectedRisks({ tenantId, period }),
     getOpportunities({ tenantId, period }),
     getRevenueForecast({ tenantId, period: "next_month" }),
-    getBranchPerformance({ tenantId, period }),
+    getRevenueByPaymentMethod({ tenantId, period }),
   ]);
 
   return {
@@ -1637,7 +1496,7 @@ async function getDashboardData({ tenantId, period }) {
     risks: riskData,
     opportunities: oppData,
     forecast: forecastData,
-    branches: branchData,
+    payments: paymentData,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -1658,14 +1517,11 @@ module.exports = {
   getRevenueByEmployee,
   getRevenueByService,
   getRevenueByPaymentMethod,
-  getRevenueByBranch,
-  getBranchPerformance,
   getServiceRevenueBreakdown,
   getProfitMarginBreakdown,
   getTopCustomers,
   getCustomerActivity,
   getServiceProfitability,
-  getInvoiceStatus,
   getRevenueForecast,
   getExpenseForecast,
   getDemandForecast,
@@ -1673,5 +1529,4 @@ module.exports = {
   getExecutiveSummary,
   searchBusinessData,
   getDashboardData,
-  getProfitByBranch,
 };

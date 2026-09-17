@@ -10,25 +10,21 @@ const TOOL_PARAM_SCHEMAS = {
   // Revenue
   revenueSummary: {
     period: _param("string", "Time period: today, yesterday, this_week, this_month, this_year, or a custom date range (start..end)"),
-    branchId: _param("string", "Optional branch identifier to filter by"),
-    groupBy: _param("string", "Group results by: service, employee, branch, customer, payment_method, day, week, month, quarter, year"),
+    groupBy: _param("string", "Group results by: service, employee, customer, payment_method, day, week, month, quarter, year"),
   },
   revenueTrends: {
     period: _param("string", "Time period: this_month, last_month, this_year, or a date range"),
     comparison: _param("string", "Comparison type: previous_period, same_period_last_year"),
-    branchId: _param("string", "Optional branch identifier to filter by"),
   },
   serviceRevenueBreakdown: {
     period: _param("string", "Time period for the breakdown"),
-    branchId: _param("string", "Optional branch identifier"),
-    groupBy: _param("string", "Group by: service, employee, branch, customer, payment_method, day, week, month, quarter, year"),
+    groupBy: _param("string", "Group by: service, staff"),
   },
 
   // Expenses
   expenseAnalysis: {
     period: _param("string", "Time period for expense analysis"),
     category: _param("string", "Optional expense category filter"),
-    branchId: _param("string", "Optional branch identifier"),
   },
   unusualExpenses: {
     period: _param("string", "Time period to check for unusual expenses"),
@@ -38,17 +34,15 @@ const TOOL_PARAM_SCHEMAS = {
   // Profitability
   profitAnalysis: {
     period: _param("string", "Time period for profit analysis"),
-    branchId: _param("string", "Optional branch identifier"),
   },
   profitMarginBreakdown: {
     period: _param("string", "Time period for margin breakdown"),
-    groupBy: _param("string", "Group by: service, employee, branch, customer, payment_method, day, week, month, quarter, year"),
+    groupBy: _param("string", "Group by: service"),
   },
 
   // Customers
   customerIntelligence: {
     period: _param("string", "Time period for customer analysis"),
-    branchId: _param("string", "Optional branch identifier"),
   },
   topCustomers: {
     limit: _param("number", "Number of top customers to return (default: 10)"),
@@ -62,7 +56,6 @@ const TOOL_PARAM_SCHEMAS = {
   // Services
   serviceIntelligence: {
     period: _param("string", "Time period for service analysis"),
-    branchId: _param("string", "Optional branch identifier"),
   },
   serviceProfitability: {
     period: _param("string", "Time period for profitability analysis"),
@@ -71,11 +64,6 @@ const TOOL_PARAM_SCHEMAS = {
   // Sales
   salesSummary: {
     period: _param("string", "Time period for sales summary"),
-    branchId: _param("string", "Optional branch identifier"),
-  },
-  invoiceStatus: {
-    period: _param("string", "Time period for invoice analysis"),
-    status: _param("string", "Filter by status: paid, unpaid, overdue, cancelled"),
   },
 
   // Forecasting
@@ -105,7 +93,6 @@ const TOOL_PARAM_SCHEMAS = {
   },
   staffPerformance: {
     period: _param("string", "Time period for staff performance"),
-    branchId: _param("string", "Optional branch identifier"),
   },
 
   // Business Health
@@ -126,14 +113,6 @@ const TOOL_PARAM_SCHEMAS = {
   revenueByPaymentMethod: {
     period: _param("string", "Time period for payment method breakdown"),
   },
-  revenueByBranch: {
-    period: _param("string", "Time period for branch revenue breakdown"),
-  },
-
-  // Branches
-  branchPerformance: {
-    period: _param("string", "Time period for branch performance analysis"),
-  },
 
   // Search
   searchBusinessData: {
@@ -145,24 +124,17 @@ const TOOL_PARAM_SCHEMAS = {
   dashboardData: {
     period: _param("string", "Time period for dashboard data"),
   },
-
-  // Suppliers
-  supplierInsights: {
-    period: _param("string", "Time period for supplier analysis"),
-  },
-
-  // Tax
-  taxSummary: {
-    period: _param("string", "Time period for tax summary"),
-  },
 };
+
+const REQUIRED_PARAMS = Object.freeze({
+  searchBusinessData: ["query"],
+});
 
 function _buildRequired(toolId, paramSchemas) {
   const meta = TOOL_PARAM_SCHEMAS[toolId];
   if (!meta) return [];
-  return Object.keys(meta).filter((k) => {
-    return false;
-  });
+  const required = REQUIRED_PARAMS[toolId] || [];
+  return Object.keys(meta).filter((k) => required.includes(k));
 }
 
 function toolSchemaForProvider(toolId) {

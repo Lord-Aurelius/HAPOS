@@ -504,6 +504,17 @@ function migrateStoreState(parsed: StoreState) {
     changed = true;
   }
 
+  // AEGIS connections: API keys (hash-only) and the bounded event log.
+  if (!Array.isArray(parsed.apiKeys)) {
+    parsed.apiKeys = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(parsed.aiEvents)) {
+    parsed.aiEvents = [];
+    changed = true;
+  }
+
   return { store: parsed, changed };
 }
 

@@ -426,6 +426,8 @@ export function createSeedStore(): StoreState {
     ],
     sessions: [],
     customerSessions: [],
+    apiKeys: [],
+    aiEvents: [],
     marketplaceAds: [
       {
         id: 'ad-royal-pomade',

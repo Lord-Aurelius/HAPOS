@@ -12,13 +12,6 @@ class BaseBusinessTool extends BaseTool {
     this._method = method;
   }
 
-  normalizeArgs(args) {
-    if (!args || typeof args !== "object") return args;
-    const n = { ...args };
-    if (typeof n.period === "string") n.period = n.period.trim().toLowerCase();
-    return n;
-  }
-
   async execute({ context, args }) {
     const safeArgs = { ...args };
     delete safeArgs.tenantId;

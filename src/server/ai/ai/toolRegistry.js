@@ -118,7 +118,6 @@ const TOOL_ALIASES = Object.freeze({
   "salesAnalytics": "salesSummary",
   "customerAnalytics": "customerIntelligence",
   "expenseAnalytics": "expenseAnalysis",
-  "branchAnalytics": "branchPerformance",
   "profitAnalytics": "profitAnalysis",
   "cashAnalytics": "cashFlowAnalysis",
   "forecastAnalytics": "revenueForecast",
@@ -131,10 +130,8 @@ const TOOL_ALIASES = Object.freeze({
   "executiveOverview": "executiveSummary",
   "dashboardOverview": "dashboardData",
   "topEmployee": "staffPerformance",
-  "topBranch": "branchPerformance",
   "topService": "serviceIntelligence",
   "topCustomer": "topCustomers",
-  "branchComparison": "branchPerformance",
 });
 
 /**
@@ -806,7 +803,7 @@ function allToolMetadata() {
  * //   registered:        2,
  * //   unregistered:     10,
  * //   implementedTools: ["revenueSummary", "profitAnalysis"],
- * //   missingTools:     ["supplierInsights", "taxSummary", ...]
+  * //   missingTools:     ["someFutureTool", ...]
  * // }
  */
 function registryHealth() {

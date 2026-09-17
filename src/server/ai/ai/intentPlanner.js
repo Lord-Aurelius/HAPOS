@@ -104,7 +104,7 @@ const INTENT_MAP = Object.freeze([
       "payment", "paid", "unpaid", "ticket size",
       "average sale",
     ],
-    toolChain: ["salesSummary", "invoiceStatus"],
+    toolChain: ["salesSummary"],
     description: "User wants sales or transaction information",
   },
 ]);
@@ -123,7 +123,6 @@ const TOOL_NAMES = {
   serviceIntelligence: "Service Intelligence",
   serviceProfitability: "Service Profitability",
   salesSummary: "Sales Summary",
-  invoiceStatus: "Invoice Status",
   revenueForecast: "Revenue Forecast",
   expenseForecast: "Expense Forecast",
   demandForecast: "Demand Forecast",
@@ -133,8 +132,6 @@ const TOOL_NAMES = {
   staffPerformance: "Staff Performance",
   businessHealthScore: "Business Health Score",
   executiveSummary: "Executive Summary",
-  supplierInsights: "Supplier Insights",
-  taxSummary: "Tax Summary",
 };
 
 const REPORTING_KEYWORDS = Object.freeze([
