@@ -21,12 +21,14 @@ import { InventoryError } from '@/server/commerce/inventory';
 import { SaleValidationError, parseKenyanPhoneInput } from '@/server/commerce/sale-validation';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
 import type { CommerceStore } from '@/server/commerce/commerce-store';
+import { FileCommerceRepository } from '@/server/commerce/file-repository';
 import { getCommerceRepository } from '@/server/commerce/repository-select';
+import type { CommerceRepository } from '@/server/commerce/repository';
 import { getCallbackBaseUrl, getPaymentGateway, initiateMpesaPayment, recordCashPayment, retryMpesaPayment } from '@/server/payments/payment-service';
 import { PaymentError } from '@/server/commerce/payments';
 import { GatewayError } from '@/server/payments/gateway';
 import { PaymentConnectionError } from '@/server/payments/connection';
-import { readStore, updateStore } from '@/server/store';
+import { updateStore } from '@/server/store';
 import type { StoreState } from '@/server/store/types';
 
 function formString(formData: FormData, key: string) {
@@ -59,6 +61,90 @@ function sellerErrorCode(error: unknown): string {
     return error.code;
   }
   throw error;
+}
+
+// ── Seller QR verification with legacy-store fallback ────────────────────────
+// Credential issuance/management still writes the JSON runtime store
+// (updateStore), while verification + orders were cut onto
+// getCommerceRepository() — SQL in postgres mode, where seller_credentials is
+// never written by the app. Until issuance migrates to the repository, resolve
+// against the primary adapter first and fall back to the file adapter so
+// previously printed QRs keep scanning. Fail-closed on revoked/expired.
+
+let fileSellerRepository: FileCommerceRepository | null = null;
+
+function getFileSellerRepository(): FileCommerceRepository {
+  if (!fileSellerRepository) {
+    fileSellerRepository = new FileCommerceRepository();
+  }
+  return fileSellerRepository;
+}
+
+function orderedSellerRepositories(): CommerceRepository[] {
+  try {
+    const primary = getCommerceRepository();
+    if (primary.backend !== 'file') {
+      return [primary, getFileSellerRepository()];
+    }
+    return [primary];
+  } catch {
+    return [getFileSellerRepository()];
+  }
+}
+
+/** Repository for follow-up reads/writes once a QR context resolved on `backend`. */
+export function getSellerCommerceRepository(backend: 'sql' | 'file'): CommerceRepository {
+  if (backend === 'file') {
+    return getFileSellerRepository();
+  }
+  try {
+    const primary = getCommerceRepository();
+    if (primary.backend === 'sql') {
+      return primary;
+    }
+  } catch {
+    /* fall through to the file adapter below */
+  }
+  return getFileSellerRepository();
+}
+
+async function verifySellerCredentialWithFallback(reference: string, bearer: string) {
+  const repos = orderedSellerRepositories();
+  let notFound: unknown = null;
+  for (const repo of repos) {
+    let tenantId: string | null = null;
+    try {
+      tenantId = await repo.resolveSellerCredentialTenant(reference.trim());
+    } catch {
+      continue;
+    }
+    if (!tenantId) {
+      continue;
+    }
+    try {
+      const context = await repo.verifySellerCredential(tenantId, reference, bearer);
+      return { context, repo, tenantId };
+    } catch (error) {
+      if (
+        error instanceof SellerError &&
+        (error.code === 'credential-revoked' ||
+          error.code === 'credential-expired' ||
+          error.code === 'inactive-seller' ||
+          error.code === 'forbidden-operation')
+      ) {
+        throw error;
+      }
+      if (error instanceof SellerError && (error.code === 'invalid-reference' || error.code === 'invalid-bearer')) {
+        notFound = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+  if (notFound) {
+    throw notFound;
+  }
+  throw new SellerError('invalid-reference', 'This seller QR code is not recognized.');
 }
 
 // ── Admin credential management ──────────────────────────────────────────────
@@ -179,14 +265,10 @@ export async function submitSellerQrOrderAction(formData: FormData) {
   }
 
   try {
-    const repo = getCommerceRepository();
     // Seller identity comes ONLY from the verified credential — never the form.
-    const tenantId = await repo.resolveSellerCredentialTenant(reference);
-    if (!tenantId) {
-      throw new SellerError('invalid-reference', 'This seller QR code is not recognized.');
-    }
-    const context = await repo.verifySellerCredential(tenantId, reference, bearer);
-    const policy = await repo.getTenantPolicy(tenantId);
+    // Falls back to the JSON runtime store where issuance still writes.
+    const { context, repo } = await verifySellerCredentialWithFallback(reference, bearer);
+    const policy = await repo.getTenantPolicy(context.tenantId);
 
     const customerId = null;
 
@@ -279,12 +361,7 @@ export async function retrySellerQrPaymentAction(formData: FormData) {
   }
 
   try {
-    const repo = getCommerceRepository();
-    const tenantId = await repo.resolveSellerCredentialTenant(reference);
-    if (!tenantId) {
-      throw new SellerError('invalid-reference', 'This seller QR code is not recognized.');
-    }
-    const context = await repo.verifySellerCredential(tenantId, reference, bearer);
+    const { context, repo, tenantId } = await verifySellerCredentialWithFallback(reference, bearer);
     const order = await repo.getOrderView(tenantId, orderId);
     if (!order || order.sellerId !== context.sellerId) {
       throw new SellerError('invalid-reference', 'That order does not belong to this seller QR.');
@@ -306,13 +383,8 @@ export async function retrySellerQrPaymentAction(formData: FormData) {
 }
 
 export async function getSellerQrContext(reference: string, bearer: string) {
-  const repo = getCommerceRepository();
-  const tenantId = await repo.resolveSellerCredentialTenant(reference);
-  if (!tenantId) {
-    throw new SellerError('invalid-reference', 'This seller QR code is not recognized.');
-  }
-  const context = await repo.verifySellerCredential(tenantId, reference, bearer);
-  const policy = await repo.getTenantPolicy(tenantId);
+  const { context, repo } = await verifySellerCredentialWithFallback(reference, bearer);
+  const policy = await repo.getTenantPolicy(context.tenantId);
   return {
     tenantId: context.tenantId,
     tenantName: policy.name,
@@ -320,5 +392,6 @@ export async function getSellerQrContext(reference: string, bearer: string) {
     sellerId: context.sellerId,
     sellerName: context.sellerName ?? null,
     credentialId: context.credentialId,
+    backend: repo.backend,
   };
 }

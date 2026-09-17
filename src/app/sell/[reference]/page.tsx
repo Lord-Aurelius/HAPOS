@@ -1,9 +1,8 @@
 import { formatCurrency } from '@/lib/format';
 import { SellerError } from '@/server/commerce/seller';
 import { checkSellerRateLimit } from '@/server/auth/seller-limit';
-import { getSellerQrContext, retrySellerQrPaymentAction, submitSellerQrOrderAction } from '@/server/actions/seller';
+import { getSellerCommerceRepository, getSellerQrContext, retrySellerQrPaymentAction, submitSellerQrOrderAction } from '@/server/actions/seller';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
-import { getCommerceRepository } from '@/server/commerce/repository-select';
 import { getMpesaAvailability } from '@/server/payments/payment-service';
 
 type SellPageProps = {
@@ -54,7 +53,7 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
     }
   }
 
-  const repo = context ? getCommerceRepository() : null;
+  const repo = context ? getSellerCommerceRepository(context.backend) : null;
   const catalog = context && repo ? await repo.getCatalogProducts(context.tenantId).then(async (products) => {
     const services = await repo.getCatalogServices(context!.tenantId);
     return [
@@ -91,9 +90,9 @@ export default async function SellerQrPage({ params, searchParams }: SellPagePro
     }
   }
 
-  // M-Pesa readiness is a server-side fact: the radio is disabled unless the
-  // tenant's payment connection is CONNECTED (never a predictable provider error).
-  const mpesa = context ? await getMpesaAvailability(getCommerceRepository(), context.tenantId) : { available: false, reason: 'payment-not-connected', connectionId: null };
+  // M-Pesa readiness is a server-side fact resolved against the same store
+  // that verified the QR (never a predictable provider error).
+  const mpesa = context && repo ? await getMpesaAvailability(repo, context.tenantId) : { available: false, reason: 'payment-not-connected', connectionId: null };
 
   const feedback = getErrorMessage(query.error) ?? (query.success === 'order-duplicate' ? 'That submission was already recorded.' : null);
 
