@@ -2,10 +2,12 @@ import { addUserAction, setUserPasswordAction, setUserStatusAction, updateStaffT
 import { setEmployeeNumberAction } from '@/server/actions/attendance';
 import {
   issueSellerCredentialAction,
+  makeSellerQrsPersistentAction,
   revokeSellerCredentialAction,
   rotateSellerCredentialAction,
 } from '@/server/actions/seller';
 import { requireSession } from '@/server/auth/demo-session';
+import { getQrWrapKey } from '@/server/crypto/qr-wrap';
 import { listUsers } from '@/server/services/app-data';
 import { listCredentialRecordsForTenant } from '@/server/services/admin-tools';
 import { listSellerCredentialsByTenant } from '@/server/store';
@@ -16,6 +18,9 @@ type StaffSettingsPageProps = {
     error?: string;
     showSellerRef?: string;
     showSellerBearer?: string;
+    count?: string;
+    already?: string;
+    missing?: string;
   }>;
 };
 
@@ -33,6 +38,10 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
     listSellerCredentialsByTenant(session.tenant.id),
   ]);
   const credentialBySeller = new Map(sellerCredentials.map((credential) => [credential.sellerId, credential]));
+  const persistentCount = sellerCredentials.filter(
+    (credential) => credential.status === 'ACTIVE' && credential.hasPersistentQr,
+  ).length;
+  const qrPersistentEnabled = Boolean(getQrWrapKey());
   const oneTimeSellerQr =
     params.showSellerRef && params.showSellerBearer
       ? `/api/v1/admin/tenants/${session.tenant.id}/seller-qr?reference=${encodeURIComponent(params.showSellerRef)}&bearer=${encodeURIComponent(params.showSellerBearer)}`
@@ -73,6 +82,10 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                 ? 'Seller QR rotated. The previous code stopped working immediately.'
               : params.success === 'seller-qr-revoked'
                 ? 'Seller QR credential revoked.'
+              : params.success === 'seller-qr-persistent'
+                ? `Persistent QR printing enabled for ${params.count ?? '0'} seller(s)${params.already && params.already !== '0' ? ` (${params.already} already persistent)` : ''}${params.missing && params.missing !== '0' ? ` — ${params.missing} seller(s) still need a QR issued below` : ''}. Print the fresh codes below; old prints for reissued sellers stopped working.`
+              : params.error === 'qr-wrap-missing'
+                ? 'Set QR_WRAP_KEY on the server first, redeploy, then try again.'
                   : 'Staff settings saved.'}
           </span>
         </section>
@@ -229,21 +242,52 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
         </div>
       </section>
 
+      {!qrPersistentEnabled ? (
+        <section className="panel">
+          <span className="pill" style={{ background: 'rgba(160, 60, 46, 0.12)', color: 'var(--danger)' }}>
+            Persistent QR printing is OFF — codes below are one-time only.
+          </span>
+          <p className="panel-copy" style={{ marginTop: 12 }}>
+            Right now each seller QR can be shown exactly once, right after it is issued. If you open this page
+            later or click &ldquo;Print / Reissue&rdquo; just to look, the previously printed code is destroyed and
+            stops scanning. To make every seller QR stay printable (all visible at once, reprintable any time):
+          </p>
+          <ol className="panel-copy" style={{ marginTop: 8, paddingLeft: 20 }}>
+            <li>Generate a key: <code>node -e &quot;console.log(require(&apos;crypto&apos;).randomBytes(32).toString(&apos;hex&apos;))&quot;</code></li>
+            <li>Add it as <code>QR_WRAP_KEY</code> in the Render environment variables (and local <code>.env</code>).</li>
+            <li>Redeploy, then return here and use &ldquo;Make all QRs persistent&rdquo;.</li>
+          </ol>
+        </section>
+      ) : null}
+
       <section className="panel">
         <div className="panel-header">
           <div>
             <h2>Seller QR credentials</h2>
             <p className="panel-copy">
-              One transaction-only QR per seller. Printing issues a fresh code and immediately
-              invalidates any previously printed copies — the bearer is never stored and cannot be
-              recovered, so print at once. Revoked codes stop working but past transactions stay valid.
+              {qrPersistentEnabled
+                ? `One transaction-only QR per seller. ${persistentCount} code(s) are persistent and stay printable below — reprinting never invalidates them. Only Reissue destroys a printed code (past transactions stay valid).`
+                : 'One transaction-only QR per seller. Printing issues a fresh code and immediately invalidates any previously printed copies — the bearer is never stored and cannot be recovered, so print at once. Revoked codes stop working but past transactions stay valid.'}
             </p>
           </div>
         </div>
 
+        {qrPersistentEnabled ? (
+          <form action={makeSellerQrsPersistentAction} className="hero-actions" style={{ marginBottom: 16 }}>
+            <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
+              Make all QRs persistent
+            </button>
+            <span className="eyebrow">Reissues codes that lack a printable copy, in one go — old prints for those sellers stop working.</span>
+          </form>
+        ) : null}
+
         {oneTimeSellerQr ? (
           <div className="stack" style={{ marginBottom: 16 }}>
-            <p className="panel-copy">Fresh seller QR — print or download it now. It cannot be shown again afterwards.</p>
+            <p className="panel-copy">
+              {qrPersistentEnabled
+                ? 'Fresh seller QR — it is also saved below as a persistent code and stays printable until reissued.'
+                : 'Fresh seller QR — print or download it now. It cannot be shown again afterwards.'}
+            </p>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`${oneTimeSellerQr}&format=svg`} alt="Seller QR code" style={{ maxWidth: 280 }} />
             <div className="hero-actions" style={{ marginTop: 0 }}>
@@ -276,7 +320,7 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                         : 'No QR credential'}
                     </div>
                     {persistentQrHref ? (
-                      <div className="stack" style={{ marginTop: 8 }}>
+                      <div className="stack" style={{ marginTop: 8 }} id={`seller-qr-${user.id}`}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={`${persistentQrHref}&format=svg`} alt={`Seller QR code for ${user.fullName}`} style={{ maxWidth: 200 }} />
                         <div style={{ display: 'flex', gap: 8 }}>
@@ -287,6 +331,11 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                             Download SVG
                           </a>
                         </div>
+                        <div className="eyebrow">Persistent code — reprinting never invalidates it.</div>
+                      </div>
+                    ) : isActive ? (
+                      <div className="eyebrow" style={{ marginTop: 8 }}>
+                        One-time code — print it now. Opening &ldquo;Print / Reissue&rdquo; destroys the current print.
                       </div>
                     ) : null}
                   </div>
@@ -301,8 +350,13 @@ export default async function StaffSettingsPage({ searchParams }: StaffSettingsP
                     ) : (
                       <form action={rotateSellerCredentialAction}>
                         <input type="hidden" name="sellerId" value={user.id} />
-                        <button type="submit" className="button secondary" style={{ minHeight: 38 }}>
-                          {isActive ? 'Print / Reissue QR' : 'Reissue QR'}
+                        <button
+                          type="submit"
+                          className="button secondary"
+                          style={{ minHeight: 38 }}
+                          title={isActive && credential?.hasPersistentQr ? 'Destroys the current printed code immediately' : undefined}
+                        >
+                          {isActive ? (credential?.hasPersistentQr ? 'Reissue QR' : 'Print / Reissue QR') : 'Reissue QR'}
                         </button>
                       </form>
                     )}

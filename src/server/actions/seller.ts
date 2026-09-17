@@ -21,9 +21,7 @@ import { InventoryError } from '@/server/commerce/inventory';
 import { SaleValidationError, parseKenyanPhoneInput } from '@/server/commerce/sale-validation';
 import { normalizeIdempotencyKey, IdempotencyKeyError } from '@/server/commerce/idempotency';
 import type { CommerceStore } from '@/server/commerce/commerce-store';
-import { FileCommerceRepository } from '@/server/commerce/file-repository';
-import { getCommerceRepository } from '@/server/commerce/repository-select';
-import type { CommerceRepository } from '@/server/commerce/repository';
+import { verifySellerCredentialWithFallback } from '@/server/commerce/seller-context';
 import { getCallbackBaseUrl, getPaymentGateway, initiateMpesaPayment, recordCashPayment, retryMpesaPayment } from '@/server/payments/payment-service';
 import { PaymentError } from '@/server/commerce/payments';
 import { GatewayError } from '@/server/payments/gateway';
@@ -63,89 +61,10 @@ function sellerErrorCode(error: unknown): string {
   throw error;
 }
 
-// ── Seller QR verification with legacy-store fallback ────────────────────────
-// Credential issuance/management still writes the JSON runtime store
-// (updateStore), while verification + orders were cut onto
-// getCommerceRepository() — SQL in postgres mode, where seller_credentials is
-// never written by the app. Until issuance migrates to the repository, resolve
-// against the primary adapter first and fall back to the file adapter so
-// previously printed QRs keep scanning. Fail-closed on revoked/expired.
-
-let fileSellerRepository: FileCommerceRepository | null = null;
-
-function getFileSellerRepository(): FileCommerceRepository {
-  if (!fileSellerRepository) {
-    fileSellerRepository = new FileCommerceRepository();
-  }
-  return fileSellerRepository;
-}
-
-function orderedSellerRepositories(): CommerceRepository[] {
-  try {
-    const primary = getCommerceRepository();
-    if (primary.backend !== 'file') {
-      return [primary, getFileSellerRepository()];
-    }
-    return [primary];
-  } catch {
-    return [getFileSellerRepository()];
-  }
-}
-
-/** Repository for follow-up reads/writes once a QR context resolved on `backend`. */
-export function getSellerCommerceRepository(backend: 'sql' | 'file'): CommerceRepository {
-  if (backend === 'file') {
-    return getFileSellerRepository();
-  }
-  try {
-    const primary = getCommerceRepository();
-    if (primary.backend === 'sql') {
-      return primary;
-    }
-  } catch {
-    /* fall through to the file adapter below */
-  }
-  return getFileSellerRepository();
-}
-
-async function verifySellerCredentialWithFallback(reference: string, bearer: string) {
-  const repos = orderedSellerRepositories();
-  let notFound: unknown = null;
-  for (const repo of repos) {
-    let tenantId: string | null = null;
-    try {
-      tenantId = await repo.resolveSellerCredentialTenant(reference.trim());
-    } catch {
-      continue;
-    }
-    if (!tenantId) {
-      continue;
-    }
-    try {
-      const context = await repo.verifySellerCredential(tenantId, reference, bearer);
-      return { context, repo, tenantId };
-    } catch (error) {
-      if (
-        error instanceof SellerError &&
-        (error.code === 'credential-revoked' ||
-          error.code === 'credential-expired' ||
-          error.code === 'inactive-seller' ||
-          error.code === 'forbidden-operation')
-      ) {
-        throw error;
-      }
-      if (error instanceof SellerError && (error.code === 'invalid-reference' || error.code === 'invalid-bearer')) {
-        notFound = error;
-        continue;
-      }
-      throw error;
-    }
-  }
-  if (notFound) {
-    throw notFound;
-  }
-  throw new SellerError('invalid-reference', 'This seller QR code is not recognized.');
-}
+// Seller QR store resolution (incl. the JSON runtime-store fallback) lives in
+// `@/server/commerce/seller-context` — NOT here. Next.js requires every
+// export of a `'use server'` module to be an async function, so the
+// synchronous repository helpers must stay in a plain server-only module.
 
 // ── Admin credential management ──────────────────────────────────────────────
 
@@ -226,6 +145,65 @@ export async function revokeSellerCredentialAction(formData: FormData) {
     });
     revalidatePath('/app/settings/staff');
     redirect('/app/settings/staff?success=seller-qr-revoked');
+  } catch (error) {
+    redirect(`/app/settings/staff?error=${sellerErrorCode(error)}`);
+  }
+}
+
+/**
+ * One-click migration to persistent QRs: rotates every ACTIVE credential of
+ * this shop that has no sealed bearer copy, so each seller's code becomes
+ * reprintable (visible for all sellers at once). Sellers without any
+ * credential are skipped — issue those individually. Rotated sellers' OLD
+ * printed copies stop working immediately; print fresh copies afterwards.
+ */
+export async function makeSellerQrsPersistentAction() {
+  const session = await requireSession(['shop_admin', 'super_admin']);
+  if (!session.tenant) {
+    redirect('/super/tenants');
+  }
+  const wrapKey = getQrWrapKey();
+  if (!wrapKey) {
+    redirect('/app/settings/staff?error=qr-wrap-missing');
+  }
+
+  try {
+    const result = await updateStore((store) => {
+      const tenantId = session.tenant!.id;
+      const sellers = store.users.filter(
+        (item) =>
+          item.tenantId === tenantId &&
+          (item.role === 'staff' || item.role === 'shop_admin') &&
+          item.isActive,
+      );
+      let rotated = 0;
+      let alreadyPersistent = 0;
+      let withoutCredential = 0;
+      for (const seller of sellers) {
+        const active = (store.sellerCredentials ?? []).find(
+          (item) => item.tenantId === tenantId && item.sellerId === seller.id && item.status === 'ACTIVE',
+        ) ?? null;
+        if (!active) {
+          withoutCredential += 1;
+          continue;
+        }
+        if (active.bearerWrapped) {
+          alreadyPersistent += 1;
+          continue;
+        }
+        rotateSellerCredential(commerceStoreOf(store) as unknown as Parameters<typeof rotateSellerCredential>[0], {
+          tenantId,
+          sellerId: seller.id,
+          createdBy: session.user.id,
+        }, { wrapKey });
+        rotated += 1;
+      }
+      return { rotated, alreadyPersistent, withoutCredential };
+    });
+    revalidatePath('/app/settings/staff');
+    redirect(
+      `/app/settings/staff?success=seller-qr-persistent&count=${result.rotated}&already=${result.alreadyPersistent}&missing=${result.withoutCredential}`,
+    );
   } catch (error) {
     redirect(`/app/settings/staff?error=${sellerErrorCode(error)}`);
   }

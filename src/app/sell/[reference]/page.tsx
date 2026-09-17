@@ -1,7 +1,8 @@
 import { formatCurrency } from '@/lib/format';
 import { SellerError } from '@/server/commerce/seller';
 import { checkSellerRateLimit } from '@/server/auth/seller-limit';
-import { getSellerCommerceRepository, getSellerQrContext, retrySellerQrPaymentAction, submitSellerQrOrderAction } from '@/server/actions/seller';
+import { getSellerQrContext, retrySellerQrPaymentAction, submitSellerQrOrderAction } from '@/server/actions/seller';
+import { getSellerCommerceRepository } from '@/server/commerce/seller-context';
 import { QuantityStepper } from '@/components/cart/quantity-stepper';
 import { getMpesaAvailability } from '@/server/payments/payment-service';
 
