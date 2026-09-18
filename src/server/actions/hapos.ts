@@ -1618,10 +1618,23 @@ export async function addUserAction(formData: FormData) {
   }
 
   const { hashPassword } = await import('@/server/store/passwords');
-  const redirectPath =
-    session.user.role === 'super_admin' ? '/super/tenants?success=user-added' : '/app/settings/staff?success=user-added';
-  const errorPath =
-    session.user.role === 'super_admin' ? '/super/tenants?error=user-exists' : '/app/settings/staff?error=user-exists';
+  const redirectBase = formString(formData, 'redirectTo');
+  const redirectPath = redirectBase
+    ? `${redirectBase}?success=user-added`
+    : session.user.role === 'super_admin' ? '/super/tenants?success=user-added' : '/app/settings/staff?success=user-added';
+  const errorPath = redirectBase
+    ? `${redirectBase}?error=user-exists`
+    : session.user.role === 'super_admin' ? '/super/tenants?error=user-exists' : '/app/settings/staff?error=user-exists';
+  const invalidEmployeePath = redirectBase
+    ? `${redirectBase}?error=invalid-employee-number`
+    : session.user.role === 'super_admin'
+      ? '/super/tenants?error=invalid-employee-number'
+      : '/app/settings/staff?error=invalid-employee-number';
+  const passwordRequiredPath = redirectBase
+    ? `${redirectBase}?error=password-required`
+    : session.user.role === 'super_admin'
+      ? '/super/tenants?error=password-required'
+      : '/app/settings/staff?error=password-required';
   const username = formString(formData, 'username');
   const email = formString(formData, 'email');
   const passwordText = formString(formData, 'password');
@@ -1644,30 +1657,18 @@ export async function addUserAction(formData: FormData) {
     try {
       employeeNumber = assertValidEmployeeNumber(normalizeEmployeeNumber(employeeNumberRaw));
     } catch {
-      redirect(
-        session.user.role === 'super_admin'
-          ? '/super/tenants?error=invalid-employee-number'
-          : '/app/settings/staff?error=invalid-employee-number',
-      );
+      redirect(invalidEmployeePath);
     }
     const numberExists = store.users.some(
       (user) => user.tenantId === tenantId && (user.employeeNumber ?? '').toUpperCase() === employeeNumber,
     );
     if (numberExists) {
-      redirect(
-        session.user.role === 'super_admin'
-          ? '/super/tenants?error=invalid-employee-number'
-          : '/app/settings/staff?error=invalid-employee-number',
-      );
+      redirect(invalidEmployeePath);
     }
   }
 
   if (!passwordText) {
-    redirect(
-      session.user.role === 'super_admin'
-        ? '/super/tenants?error=password-required'
-        : '/app/settings/staff?error=password-required',
-    );
+    redirect(passwordRequiredPath);
   }
 
   await updateStore((store) => {
@@ -1692,7 +1693,7 @@ export async function addUserAction(formData: FormData) {
   });
 
   touchShopPaths();
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   redirect(redirectPath);
 }
 
@@ -1728,7 +1729,7 @@ export async function setUserPasswordAction(formData: FormData) {
   });
 
   touchShopPaths();
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   redirect(redirectTo);
 }
 
@@ -1781,7 +1782,7 @@ export async function setUserStatusAction(formData: FormData) {
   });
 
   touchShopPaths();
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   redirect(redirectTo);
 }
 
@@ -1957,9 +1958,10 @@ export async function addSubscriptionPackageAction(formData: FormData) {
 
   const name = formString(formData, 'name');
   const code = normalizePlanCode(formString(formData, 'code') || name);
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   if (!name || !code) {
-    redirect('/super/tenants?error=package-required');
+    redirect(`${redirectBase}?error=package-required`);
   }
 
   const existing = await readStore();
@@ -1968,7 +1970,7 @@ export async function addSubscriptionPackageAction(formData: FormData) {
   );
 
   if (duplicate) {
-    redirect('/super/tenants?error=package-exists');
+    redirect(`${redirectBase}?error=package-exists`);
   }
 
   const now = new Date().toISOString();
@@ -1994,9 +1996,9 @@ export async function addSubscriptionPackageAction(formData: FormData) {
     });
   });
 
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   touchShopPaths();
-  redirect('/super/tenants?success=package-added');
+  redirect(`${redirectBase}?success=package-added`);
 }
 
 export async function updateSubscriptionPackageAction(formData: FormData) {
@@ -2005,9 +2007,10 @@ export async function updateSubscriptionPackageAction(formData: FormData) {
   const packageId = formString(formData, 'packageId');
   const name = formString(formData, 'name');
   const code = normalizePlanCode(formString(formData, 'code') || name);
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   if (!packageId || !name || !code) {
-    redirect('/super/tenants?error=package-required');
+    redirect(`${redirectBase}?error=package-required`);
   }
 
   const existing = await readStore();
@@ -2016,7 +2019,7 @@ export async function updateSubscriptionPackageAction(formData: FormData) {
   );
 
   if (duplicate) {
-    redirect('/super/tenants?error=package-exists');
+    redirect(`${redirectBase}?error=package-exists`);
   }
 
   const includesMarketplace = formCheckbox(formData, 'includesMarketplace');
@@ -2048,9 +2051,9 @@ export async function updateSubscriptionPackageAction(formData: FormData) {
     }
   });
 
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   touchShopPaths();
-  redirect('/super/tenants?success=package-updated');
+  redirect(`${redirectBase}?success=package-updated`);
 }
 
 export async function updateTenantSubscriptionAction(formData: FormData) {
@@ -2060,6 +2063,7 @@ export async function updateTenantSubscriptionAction(formData: FormData) {
   const startsAt = formDateTimeString(formData, 'startsAt');
   const status = formString(formData, 'status');
   const amountRaw = formString(formData, 'amount');
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   await updateStore((store) => {
     const tenant = store.tenants.find((item) => item.id === tenantId);
@@ -2095,9 +2099,9 @@ export async function updateTenantSubscriptionAction(formData: FormData) {
     subscription.updatedAt = new Date().toISOString();
   });
 
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   touchShopPaths();
-  redirect('/super/tenants?success=subscription-updated');
+  redirect(`${redirectBase}?success=subscription-updated`);
 }
 
 export async function addTenantAction(formData: FormData) {
@@ -2111,16 +2115,17 @@ export async function addTenantAction(formData: FormData) {
   const endsAt =
     formDateTimeString(formData, 'endsAt') ?? new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString();
   const amountRaw = formString(formData, 'amount');
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   if (existing.tenants.some((tenant) => tenant.slug.toLowerCase() === slug.toLowerCase())) {
-    redirect('/super/tenants?error=tenant-exists');
+    redirect(`${redirectBase}?error=tenant-exists`);
   }
 
   let uploadedLogoUrl: string | null = null;
   try {
     uploadedLogoUrl = logoFile instanceof File ? await storeTenantLogo(logoFile, tenantId) : null;
   } catch {
-    redirect('/super/tenants?error=logo-upload');
+    redirect(`${redirectBase}?error=logo-upload`);
   }
 
   await updateStore((store) => {
@@ -2164,8 +2169,8 @@ export async function addTenantAction(formData: FormData) {
     });
   });
 
-  revalidatePath('/super/tenants');
-  redirect('/super/tenants?success=tenant-added');
+  revalidatePath('/super/tenants', 'layout');
+  redirect(`${redirectBase}?success=tenant-added&tenantId=${tenantId}`);
 }
 
 export async function updateTenantBrandingAction(formData: FormData) {
@@ -2173,12 +2178,13 @@ export async function updateTenantBrandingAction(formData: FormData) {
   const tenantId = formString(formData, 'tenantId');
   const logoFile = formData.get('logoFile');
   const removeLogo = formString(formData, 'removeLogo') === 'on';
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   let uploadedLogoUrl: string | null = null;
   try {
     uploadedLogoUrl = logoFile instanceof File ? await storeTenantLogo(logoFile, tenantId) : null;
   } catch {
-    redirect('/super/tenants?error=logo-upload');
+    redirect(`${redirectBase}?error=logo-upload`);
   }
 
   await updateStore((store) => {
@@ -2196,15 +2202,16 @@ export async function updateTenantBrandingAction(formData: FormData) {
     tenant.updatedAt = new Date().toISOString();
   });
 
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   touchShopPaths();
-  redirect('/super/tenants?success=branding-updated');
+  redirect(`${redirectBase}?success=branding-updated`);
 }
 
 export async function suspendTenantAction(formData: FormData) {
   await requireSession(['super_admin']);
   const tenantId = formString(formData, 'tenantId');
   const reason = formString(formData, 'reason');
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   await updateStore((store) => {
     const tenant = store.tenants.find((item) => item.id === tenantId);
@@ -2221,57 +2228,14 @@ export async function suspendTenantAction(formData: FormData) {
     }
   });
 
-  revalidatePath('/super/tenants');
-  redirect('/super/tenants?success=suspended');
-}
-
-export async function renewTenantAction(formData: FormData) {
-  await requireSession(['super_admin']);
-  const tenantId = formString(formData, 'tenantId');
-  const endsAt = formString(formData, 'endsAt');
-  const paymentTerms = formString(formData, 'paymentTerms');
-
-  await updateStore((store) => {
-    const tenant = store.tenants.find((item) => item.id === tenantId);
-    if (tenant) {
-      tenant.status = 'active';
-      tenant.suspensionReason = null;
-      tenant.updatedAt = new Date().toISOString();
-    }
-
-    const subscription = store.subscriptions.find((item) => item.tenantId === tenantId);
-    if (subscription) {
-      subscription.status = 'active';
-      subscription.endsAt = endsAt || subscription.endsAt;
-      subscription.paymentTerms = paymentTerms || subscription.paymentTerms;
-      subscription.updatedAt = new Date().toISOString();
-    }
-  });
-
-  revalidatePath('/super/tenants');
-  redirect('/super/tenants?success=renewed');
-}
-
-export async function renameTenantAction(formData: FormData) {
-  await requireSession(['super_admin']);
-  const tenantId = formString(formData, 'tenantId');
-  const name = formString(formData, 'name');
-
-  await updateStore((store) => {
-    const tenant = store.tenants.find((item) => item.id === tenantId);
-    if (tenant) {
-      tenant.name = name;
-      tenant.updatedAt = new Date().toISOString();
-    }
-  });
-
-  revalidatePath('/super/tenants');
-  redirect('/super/tenants?success=renamed');
+  revalidatePath('/super/tenants', 'layout');
+  redirect(`${redirectBase}?success=suspended`);
 }
 
 export async function clearTenantCustomersAction(formData: FormData) {
   await requireSession(['super_admin']);
   const tenantId = formString(formData, 'tenantId');
+  const redirectBase = formString(formData, 'redirectTo') || '/super/tenants';
 
   await updateStore((store) => {
     store.customers = store.customers.filter((item) => item.tenantId !== tenantId);
@@ -2283,7 +2247,7 @@ export async function clearTenantCustomersAction(formData: FormData) {
     store.customerSessions = store.customerSessions.filter((item) => item.tenantId !== tenantId);
   });
 
-  revalidatePath('/super/tenants');
+  revalidatePath('/super/tenants', 'layout');
   touchShopPaths();
-  redirect('/super/tenants?success=cleared');
+  redirect(`${redirectBase}?success=cleared`);
 }

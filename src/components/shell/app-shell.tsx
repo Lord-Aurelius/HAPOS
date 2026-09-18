@@ -12,7 +12,7 @@ type AppShellProps = {
 };
 
 export function AppShell({ session, children }: AppShellProps) {
-  const homeHref = session.user.role === 'super_admin' ? '/super/tenants' : '/app/dashboard';
+  const homeHref = session.user.role === 'super_admin' ? '/super/dashboard' : '/app/dashboard';
   const workspaceName = session.tenant?.name ?? 'HAPOS Platform';
   const workspaceLabel = session.tenant ? 'Business workspace' : 'Platform workspace';
   const userRoleLabel = session.user.role.replace('_', ' ');

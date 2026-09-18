@@ -61,6 +61,10 @@ const iconMap: Record<string, typeof LayoutDashboard> = {
   '/app/seller': ShoppingBag,
   '/app/attendance': CalendarCheck,
   '/super/tenants': Building2,
+  '/super/dashboard': LayoutDashboard,
+  '/super/onboard': PenSquare,
+  '/super/packages': Package,
+  '/super/connections': BrainCircuit,
   '/super/marketplace': Store,
 };
 

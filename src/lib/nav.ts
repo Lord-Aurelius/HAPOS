@@ -31,7 +31,11 @@ export const shopNav: NavItem[] = [
 ];
 
 export const superNav: NavItem[] = [
+  { href: '/super/dashboard', label: 'Dashboard', roles: ['super_admin'] },
   { href: '/super/tenants', label: 'Tenants', roles: ['super_admin'] },
+  { href: '/super/onboard', label: 'Onboard', roles: ['super_admin'] },
+  { href: '/super/packages', label: 'Packages', roles: ['super_admin'] },
+  { href: '/super/connections', label: 'Connections', roles: ['super_admin'] },
   { href: '/super/payments', label: 'Payments audit', roles: ['super_admin'] },
   { href: '/super/marketplace', label: 'Marketplace', roles: ['super_admin'] },
 ];
